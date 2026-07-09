@@ -1,0 +1,18 @@
+{
+  "generatedFrom": [
+    "data/raw/craigslist-carstrucks-data/vehicles.csv",
+    "data/raw/car-features-msrp/data.csv",
+    "data/raw/usedcarscatalog/cars.csv",
+    "data/raw/2023-car-model-dataset/Car_Models.csv",
+    "data/raw/electric-vehicle-specs-2025/electric_vehicles_spec_2025.csv.csv"
+  ],
+  "vehicleCount": 320,
+  "notes": [
+    "Craigslist provides US used prices, mileage, listing URLs, image URLs, drivetrain, fuel, and transmission.",
+    "CooperUnion cardataset enriches MPG, MSRP, horsepower, driven wheels, and body style where model/year matches.",
+    "Used-cars-catalog adds manual, AWD/4WD, wagon, minivan, and additional used-market coverage.",
+    "2023 model and 2025 EV specification datasets add newer/current-model coverage where used listings are sparse.",
+    "The processed catalog is balanced by body style, drivetrain, transmission, EV, and newer-year coverage to reduce no-match cases.",
+    "Safety and reliability are conservative heuristics until dedicated safety/reliability overlays are connected."
+  ]
+}
