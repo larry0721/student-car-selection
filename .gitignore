@@ -36,3 +36,6 @@ pnpm-debug.log*
 /app.js
 /index.html
 /styles.css
+.vercel/
+.env*
+!.env.example
