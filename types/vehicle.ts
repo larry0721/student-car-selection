@@ -30,6 +30,8 @@ export type Vehicle = {
   imageSource?: string;
   imageVerified?: boolean;
   listingUrl?: string;
+  dataSources?: string[];
+  dataUpdatedAt?: string;
 };
 
 export type ScoredVehicle = Vehicle & {

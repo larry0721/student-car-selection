@@ -1,4 +1,5 @@
 {
+  "generatedAt": "2026-07-08",
   "generatedFrom": [
     "data/raw/craigslist-carstrucks-data/vehicles.csv",
     "data/raw/car-features-msrp/data.csv",

@@ -78,6 +78,7 @@ export type UsedCarListing = {
 
 export type EnrichedVehicle = Vehicle & {
   dataSources: DataSourceName[];
+  dataUpdatedAt: string;
 };
 
 export type DataProviderStatus = {

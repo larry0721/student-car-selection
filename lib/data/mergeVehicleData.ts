@@ -1,6 +1,9 @@
+import catalogMetadata from "@/data/processed/vehicleCatalog.metadata.json";
 import { getVehicleFamilyKey, getVehicleKey } from "@/lib/data/vehicleIdentity";
 import type { EnrichedVehicle, VehicleDataOverlay } from "@/types/data";
 import type { Vehicle } from "@/types/vehicle";
+
+const catalogGeneratedAt = String((catalogMetadata as { generatedAt?: string }).generatedAt || "2026-07-08");
 
 export function mergeVehicleData(vehicles: Vehicle[], overlays: VehicleDataOverlay[]): EnrichedVehicle[] {
   const overlaysByExactKey = new Map<string, VehicleDataOverlay[]>();
@@ -21,7 +24,7 @@ export function mergeVehicleData(vehicles: Vehicle[], overlays: VehicleDataOverl
 
     return matches.reduce<EnrichedVehicle>(
       (mergedVehicle, overlay) => applyOverlay(mergedVehicle, overlay),
-      { ...vehicle, dataSources: ["seed"] },
+      { ...vehicle, dataSources: ["seed"], dataUpdatedAt: catalogGeneratedAt },
     );
   });
 }
@@ -30,6 +33,7 @@ function applyOverlay(vehicle: EnrichedVehicle, overlay: VehicleDataOverlay): En
   return {
     ...vehicle,
     dataSources: Array.from(new Set([...vehicle.dataSources, overlay.source])),
+    dataUpdatedAt: getLatestDate(vehicle.dataUpdatedAt, overlay.fetchedAt),
     reliabilityScore: overlay.reliabilityScore ?? vehicle.reliabilityScore,
     safetyScore: overlay.safetyScore ?? vehicle.safetyScore,
     insurance: overlay.insuranceMonthly ?? vehicle.insurance,
@@ -56,4 +60,13 @@ function applyOverlay(vehicle: EnrichedVehicle, overlay: VehicleDataOverlay): En
 function mergeList(base: string[], incoming?: string[]) {
   if (!incoming?.length) return base;
   return Array.from(new Set([...base, ...incoming.map((item) => item.trim()).filter(Boolean)])).slice(0, 6);
+}
+
+function getLatestDate(baseDate: string, incomingDate?: string) {
+  if (!incomingDate) return baseDate;
+  const baseTime = Date.parse(baseDate);
+  const incomingTime = Date.parse(incomingDate);
+  if (!Number.isFinite(incomingTime)) return baseDate;
+  if (!Number.isFinite(baseTime)) return incomingDate;
+  return incomingTime > baseTime ? incomingDate : baseDate;
 }

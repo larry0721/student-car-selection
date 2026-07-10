@@ -20,6 +20,8 @@ export function RecommendationCard({
   const cons = aiRecommendation?.watchouts.length ? aiRecommendation.watchouts : vehicle.watchouts;
   const hasVerifiedImage = Boolean(vehicle.imageUrl && vehicle.imageVerified);
   const imageLabel = vehicle.imageSource === "csv-import" ? "Uploaded vehicle photo" : "Verified listing photo";
+  const sourceLabel = formatDataSources(vehicle.dataSources);
+  const dataDate = formatDataDate(vehicle.dataUpdatedAt);
 
   return (
     <article className="overflow-hidden rounded-lg border border-white/10 bg-white/[0.055] shadow-[0_24px_70px_rgba(0,0,0,0.28)] backdrop-blur">
@@ -83,6 +85,13 @@ export function RecommendationCard({
           <Stat label="Fuel" value={`${formatMoney(vehicle.ownership.fuelMonthly)}/mo`} />
           <Stat label="Depreciation" value={`${formatMoney(vehicle.ownership.depreciationAnnual)}/yr`} />
         </dl>
+
+        <div className="rounded-lg border border-white/10 bg-slate-950/35 p-3 text-xs font-bold leading-5 text-slate-300">
+          <span className="block font-black uppercase tracking-[0.1em] text-slate-500">Data source</span>
+          <span>{sourceLabel}</span>
+          <span className="mx-2 text-slate-600">/</span>
+          <span>Updated {dataDate}</span>
+        </div>
 
         <div>
           <h4 className="mb-2 text-xs font-black uppercase tracking-[0.1em] text-slate-400">
@@ -197,4 +206,28 @@ function NoteList({ title, items }: { title: string; items: string[] }) {
       </ul>
     </div>
   );
+}
+
+function formatDataSources(sources?: string[]) {
+  if (!sources?.length) return "Processed vehicle catalog";
+  const labels: Record<string, string> = {
+    seed: "Processed vehicle catalog",
+    nhtsa: "NHTSA",
+    "fueleconomy.gov": "FuelEconomy.gov",
+    "listing-api": "Listing API",
+    "csv-import": "Uploaded CSV",
+  };
+
+  return sources.map((source) => labels[source] || source).join(", ");
+}
+
+function formatDataDate(value?: string) {
+  if (!value) return "unknown";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  }).format(date);
 }

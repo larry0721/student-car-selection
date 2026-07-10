@@ -1,4 +1,5 @@
 import { calculateBudget } from "@/lib/affordability";
+import { getVehicleDataQualityMisses, isRecommendableVehicle } from "@/lib/data/vehicleValidation";
 import type { BuyerProfile, ScoreWeights } from "@/types/buyer";
 import type { ScoredVehicle, Vehicle } from "@/types/vehicle";
 
@@ -32,6 +33,7 @@ export function rankVehicles(profile: BuyerProfile, vehicles: Vehicle[]): Scored
   const budget = calculateBudget(profile);
   const maxPrice = getEffectiveMaxPrice(profile, budget.maxPurchasePrice);
   const scoredVehicles = vehicles
+    .filter(isRecommendableVehicle)
     .map((vehicle) => scoreVehicle(vehicle, profile, maxPrice))
     .sort((a, b) => b.score - a.score || a.price - b.price);
 
@@ -42,10 +44,13 @@ export function rankVehicles(profile: BuyerProfile, vehicles: Vehicle[]): Scored
 }
 
 export function getRequirementMatches(profile: BuyerProfile, vehicles: Vehicle[]) {
-  return vehicles.filter((vehicle) => !getVehicleRequirementMisses(vehicle, profile).length);
+  return vehicles.filter((vehicle) => isRecommendableVehicle(vehicle) && !getVehicleRequirementMisses(vehicle, profile).length);
 }
 
 export function getVehicleRequirementMisses(vehicle: Vehicle, profile: BuyerProfile) {
+  const dataQualityMisses = getVehicleDataQualityMisses(vehicle);
+  if (dataQualityMisses.length) return dataQualityMisses;
+
   const budget = calculateBudget(profile);
   const maxPrice = getEffectiveMaxPrice(profile, budget.maxPurchasePrice);
   const misses: string[] = [];

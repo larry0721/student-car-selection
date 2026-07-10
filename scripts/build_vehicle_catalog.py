@@ -3,6 +3,7 @@ import json
 import re
 import statistics
 from collections import defaultdict
+from datetime import date
 from pathlib import Path
 
 
@@ -1007,6 +1008,7 @@ def main():
     with REPORT.open("w", encoding="utf-8") as handle:
         json.dump(
             {
+                "generatedAt": date.today().isoformat(),
                 "generatedFrom": [
                     "data/raw/craigslist-carstrucks-data/vehicles.csv",
                     "data/raw/car-features-msrp/data.csv",
