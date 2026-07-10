@@ -1,18 +1,9 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  turbopack: {},
   outputFileTracingExcludes: {
     "*": ["./data/raw/**/*", "./data/database/**/*"],
-  },
-  webpack: (config, { dev }) => {
-    if (dev) {
-      config.watchOptions = {
-        ...config.watchOptions,
-        ignored: ["**/data/raw/**", "**/data/database/**"],
-      };
-    }
-
-    return config;
   },
 };
 
