@@ -11,6 +11,7 @@ export type VehicleValidationField =
   | "price"
   | "mileage"
   | "mpg"
+  | "insurance"
   | "safetyScore"
   | "reliabilityScore"
   | "maintenanceEstimate"
@@ -145,6 +146,7 @@ export function validateVehicleRecord(vehicle: Vehicle, currentYear = new Date()
 
   validateMpg(vehicle, issues);
   validateScores(vehicle, issues);
+  validateOwnershipEstimates(vehicle, issues);
   validateSeats(vehicle, issues);
   validateDrivetrainModelFit(vehicle, modelKey, issues);
 
@@ -189,6 +191,12 @@ function validateScores(vehicle: Vehicle, issues: VehicleValidationIssue[]) {
 
   if (!inRange(vehicle.reliabilityScore, 45, 100)) {
     issues.push({ field: "reliabilityScore", message: "reliability score must be between 45 and 100" });
+  }
+}
+
+function validateOwnershipEstimates(vehicle: Vehicle, issues: VehicleValidationIssue[]) {
+  if (!inRange(vehicle.insurance, 55, 450)) {
+    issues.push({ field: "insurance", message: "monthly insurance estimate is outside a realistic first-car range" });
   }
 
   const maintenance = vehicle.maintenanceEstimate;

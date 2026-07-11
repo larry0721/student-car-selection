@@ -302,8 +302,16 @@ export function BuyerProfilePlanner() {
         </header>
 
         <section className="grid gap-3 md:grid-cols-4">
-          <AdvisorTile label="Buying power" value={formatMoney(budget.maxPurchasePrice)} />
-          <AdvisorTile label="Payment room" value={`${formatMoney(budget.paymentBudget)}/mo`} />
+          <AdvisorTile
+            description={`Loan principal from ${formatMoney(budget.paymentBudget)}/mo over ${profile.loanTermMonths} months at ${profile.apr}% APR, plus ${formatMoney(profile.downPayment)} down, divided by estimated tax and fees.`}
+            label="Buying power"
+            value={formatMoney(budget.maxPurchasePrice)}
+          />
+          <AdvisorTile
+            description={`${formatMoney(profile.monthlyBudget)} budget minus ${formatMoney(profile.insuranceBudget)} insurance, ${formatMoney(budget.fuelCost)} fuel, and ${formatMoney(budget.maintenanceReserve)} maintenance reserve.`}
+            label="Payment room"
+            value={`${formatMoney(budget.paymentBudget)}/mo`}
+          />
           <AdvisorTile label="Top match" value={rankedVehicles[0] ? `${rankedVehicles[0].make} ${rankedVehicles[0].model}` : "No match"} />
           <AdvisorTile label="Compare list" value={`${comparedVehicles.length} cars`} />
         </section>
@@ -496,14 +504,16 @@ export function BuyerProfilePlanner() {
                   <h2 className="text-2xl font-black text-white">Recommended cars</h2>
                   <p className="text-sm font-semibold text-slate-400">{aiStatus}</p>
                 </div>
-                <p className="text-sm font-black text-cyan-300">{answeredCount} optional signals used</p>
+                <p className="text-sm font-black text-cyan-300">
+                  Showing top {Math.min(3, rankedVehicles.length)} · {answeredCount} optional signals used
+                </p>
               </div>
 
               {hasNoMatch ? (
                 <NoMatchPanel reasons={noMatchReasons} />
               ) : (
                 <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-3">
-                  {rankedVehicles.map((vehicle) => (
+                  {rankedVehicles.slice(0, 3).map((vehicle) => (
                     <RecommendationCard
                       aiRecommendation={aiByVehicleId.get(vehicle.id)}
                       isCompared={compareIds.includes(vehicle.id)}
@@ -589,8 +599,11 @@ function ComparisonView({ vehicles }: { vehicles: ScoredVehicle[] }) {
                 {vehicle.imageUrl && vehicle.imageVerified ? (
                   <img alt={`${vehicle.make} ${vehicle.model}`} className="h-full w-full object-cover" src={vehicle.imageUrl} />
                 ) : (
-                  <div className="grid h-full place-items-center px-3 text-center text-xs font-black uppercase tracking-[0.12em] text-slate-500">
-                    Verified photo pending
+                  <div aria-hidden="true" className="relative h-full bg-slate-900">
+                    <div className="absolute inset-x-5 bottom-8 h-8 rounded-t-full border border-white/10 bg-white/[0.035]" />
+                    <div className="absolute bottom-6 left-1/2 h-2.5 w-20 -translate-x-1/2 rounded-full bg-cyan-300/18" />
+                    <div className="absolute bottom-5 left-[34%] h-4 w-4 rounded-full border border-white/15 bg-slate-950" />
+                    <div className="absolute bottom-5 right-[34%] h-4 w-4 rounded-full border border-white/15 bg-slate-950" />
                   </div>
                 )}
               </div>
@@ -600,11 +613,14 @@ function ComparisonView({ vehicles }: { vehicles: ScoredVehicle[] }) {
               <p className="text-xs font-bold uppercase tracking-[0.12em] text-cyan-300">{vehicle.year} · {vehicle.bodyType}</p>
             </div>
           ))}
-          <CompareRow label="Compatibility" values={vehicles.map((vehicle) => `${vehicle.score}/100`)} />
+          <CompareRow label="Overall match" values={vehicles.map((vehicle) => `${vehicle.matchSummary.overall}/100`)} />
+          <CompareRow label="Affordability" values={vehicles.map((vehicle) => `${vehicle.matchSummary.affordability}/100`)} />
+          <CompareRow label="Reliability match" values={vehicles.map((vehicle) => `${vehicle.matchSummary.reliability}/100`)} />
+          <CompareRow label="Safety match" values={vehicles.map((vehicle) => `${vehicle.matchSummary.safety}/100`)} />
+          <CompareRow label="Ownership cost" values={vehicles.map((vehicle) => `${vehicle.matchSummary.ownershipCost}/100`)} />
+          <CompareRow label="Practicality" values={vehicles.map((vehicle) => `${vehicle.matchSummary.practicality}/100`)} />
           <CompareRow label="Price" values={vehicles.map((vehicle) => formatMoney(vehicle.price))} />
           <CompareRow label="Mileage" values={vehicles.map((vehicle) => formatNumber(vehicle.mileage))} />
-          <CompareRow label="Reliability" values={vehicles.map((vehicle) => `${vehicle.reliabilityScore}/100`)} />
-          <CompareRow label="Safety" values={vehicles.map((vehicle) => `${vehicle.safetyScore}/100`)} />
           <CompareRow label="Insurance" values={vehicles.map((vehicle) => `${formatMoney(vehicle.ownership.insuranceMonthly)}/mo`)} />
           <CompareRow label="Maintenance" values={vehicles.map((vehicle) => `${formatMoney(vehicle.ownership.maintenanceMonthly)}/mo`)} />
           <CompareRow label="Fuel" values={vehicles.map((vehicle) => `${formatMoney(vehicle.ownership.fuelMonthly)}/mo`)} />
@@ -811,11 +827,12 @@ function SelectField({
   );
 }
 
-function AdvisorTile({ label, value }: { label: string; value: string }) {
+function AdvisorTile({ description, label, value }: { description?: string; label: string; value: string }) {
   return (
     <div className="min-h-24 rounded-lg border border-white/10 bg-white/[0.055] p-4 shadow-[0_18px_50px_rgba(0,0,0,0.18)] backdrop-blur">
       <strong className="block truncate text-xl font-black text-white">{value}</strong>
       <span className="mt-2 block text-xs font-black uppercase tracking-[0.12em] text-slate-400">{label}</span>
+      {description ? <span className="mt-2 block text-xs font-semibold leading-5 text-slate-500">{description}</span> : null}
     </div>
   );
 }

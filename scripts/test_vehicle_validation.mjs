@@ -37,6 +37,21 @@ assert.ok(invalidRecords.length >= 1, "validator should identify suspicious sour
   assert.deepEqual(validateVehicleRecord(record), [], `${vehicleId} should pass validation`);
 });
 
+const validFixture = findVehicle("toyota-corolla-2014-craigslist-carstrucks-data");
+assert.ok(validFixture, "valid fixture should exist for synthetic validation checks");
+assert.ok(
+  validateVehicleRecord({ ...validFixture, id: "synthetic-high-insurance", insurance: 999 }).some(
+    (issue) => issue.field === "insurance",
+  ),
+  "validator should reject unrealistic insurance estimates",
+);
+assert.ok(
+  validateVehicleRecord({ ...validFixture, id: "synthetic-high-maintenance", maintenanceEstimate: 999 }).some(
+    (issue) => issue.field === "maintenanceEstimate",
+  ),
+  "validator should reject unrealistic maintenance estimates",
+);
+
 invalidRecords.forEach(({ vehicle, issues }) => {
   assert.ok(vehicle.id, "invalid vehicles should still retain source ids for auditability");
   assert.ok(issues.every((issue) => issue.field && issue.message), `${vehicle.id} issues should be explainable`);

@@ -1,5 +1,5 @@
-import { calculateBudget } from "@/lib/affordability";
-import { getVehicleDataQualityMisses, isRecommendableVehicle } from "@/lib/data/vehicleValidation";
+import { calculateBudget } from "./affordability";
+import { getVehicleDataQualityMisses, isRecommendableVehicle } from "./data/vehicleValidation";
 import type { BuyerProfile, ScoreWeights } from "@/types/buyer";
 import type { ScoredVehicle, Vehicle } from "@/types/vehicle";
 
@@ -124,49 +124,62 @@ function transmissionMeetsRequirement(transmission: string, requirement: BuyerPr
 function scoreVehicle(vehicle: Vehicle, profile: BuyerProfile, maxPrice: number): Omit<ScoredVehicle, "similarAlternatives"> {
   const reasons: string[] = [];
   const misses: string[] = [];
-  const budgetFit = clamp((maxPrice / Math.max(vehicle.price, 1)) * 86);
-  const paymentFit = profile.monthlyBudget
-    ? clamp((profile.monthlyBudget / Math.max(vehicle.insurance + estimateFuelCost(vehicle, profile) + 175, 1)) * 70)
-    : 76;
-  const mileageFit = profile.maxMileage ? clamp((profile.maxMileage / Math.max(vehicle.mileage, 1)) * 84) : 78;
-  const yearFit = profile.minYear ? (vehicle.year >= profile.minYear ? 100 : Math.max(35, 100 - (profile.minYear - vehicle.year) * 8)) : 78;
-  const economyFit = vehicle.mpg >= profile.minMpg ? 100 : clamp((vehicle.mpg / Math.max(profile.minMpg, 1)) * 82);
-  const insuranceFit = profile.insuranceBudget ? clamp((profile.insuranceBudget / Math.max(vehicle.insurance, 1)) * 88) : 82;
+  const budget = calculateBudget(profile);
+  const maintenanceMonthly = vehicle.maintenanceEstimate ?? estimateMaintenanceMonthly(vehicle);
+  const fuelMonthly = Math.round(estimateFuelCost(vehicle, profile));
+  const depreciationAnnual = vehicle.depreciationEstimate ?? estimateDepreciationAnnual(vehicle);
+  const estimatedPayment = estimateMonthlyPayment(vehicle, profile);
+  const ownershipMonthly = vehicle.insurance + maintenanceMonthly + fuelMonthly + Math.round(depreciationAnnual / 12);
+  const firstYearOwnership = {
+    insurance: vehicle.insurance * 12,
+    maintenance: maintenanceMonthly * 12,
+    fuel: fuelMonthly * 12,
+    depreciation: depreciationAnnual,
+    total: vehicle.insurance * 12 + maintenanceMonthly * 12 + fuelMonthly * 12 + depreciationAnnual,
+  };
+  const paymentFit = getPaymentFit(estimatedPayment, budget.paymentBudget, profile);
+  const purchaseFit = scoreLowerCost(vehicle.price, maxPrice, 0.58, 1.08);
+  const insuranceFit = getInsuranceFit(vehicle, profile);
+  const affordabilityFit = Math.round(purchaseFit * 0.5 + paymentFit * 0.35 + insuranceFit * 0.15);
+  const ownershipCostFit = getOwnershipCostFit(ownershipMonthly, profile);
+  const mileageFit = getMileageFit(vehicle, profile);
+  const yearFit = getYearFit(vehicle, profile);
+  const economyFit = getFuelEconomyFit(vehicle, profile);
   const bodyFit = getBodyStyleFit(vehicle, profile);
   const drivetrainFit = getDrivetrainFit(vehicle, profile);
   const transmissionFit = getTransmissionFit(vehicle, profile);
   const cargoFit = getCargoFit(vehicle, profile);
-  const familyFit = vehicle.seats >= Math.max(profile.familySize, 1) ? 100 : 45;
+  const familyFit = getFamilyFit(vehicle, profile);
   const climateFit = getClimateFit(vehicle, profile);
-  const safetyFit = getImportanceFit(vehicle.safetyScore, profile.safetyPriority === "maximum" ? 5 : profile.safetyPriority === "high" ? 4 : 3);
-  const reliabilityFit = getImportanceFit(vehicle.reliabilityScore, profile.reliabilityImportance);
-  const performanceFit = getImportanceFit(vehicle.performanceScore, profile.performanceImportance);
-  const resaleFit = getImportanceFit(vehicle.resaleScore, profile.resaleValueImportance);
-  const featureFit = getImportanceFit(vehicle.featureScore, profile.advancedFeaturesImportance);
+  const safetyFit = getSafetyFit(vehicle, profile);
+  const reliabilityFit = getReliabilityFit(vehicle, profile);
+  const performanceFit = getPerformanceFit(vehicle, profile);
+  const resaleFit = getResaleFit(vehicle, profile);
+  const featureFit = getFeatureFit(vehicle, profile);
   const modificationFit = getModificationFit(vehicle, profile);
   const purchaseConditionFit = getPurchaseConditionFit(vehicle, profile);
 
-  addFitNotes(vehicle, profile, maxPrice, reasons, misses);
+  addFitNotes(vehicle, profile, maxPrice, estimatedPayment, ownershipMonthly, fuelMonthly, reasons, misses);
 
   const scoreBreakdown: Record<keyof ScoreWeights, number> = {
-    budgetFit: Math.round((budgetFit * 0.7 + paymentFit * 0.3)),
+    budgetFit: affordabilityFit,
     reliability: Math.round(reliabilityFit),
     safety: Math.round(safetyFit),
     fuelEconomy: Math.round(economyFit),
-    insuranceCost: Math.round(insuranceFit),
+    insuranceCost: Math.round(ownershipCostFit),
     performance: Math.round(performanceFit),
     practicality: Math.round(
-      bodyFit * 0.2 +
-        cargoFit * 0.18 +
-        familyFit * 0.12 +
-        drivetrainFit * 0.1 +
-        transmissionFit * 0.07 +
-        climateFit * 0.08 +
+      bodyFit * 0.22 +
+        cargoFit * 0.16 +
+        familyFit * 0.13 +
+        drivetrainFit * 0.12 +
+        climateFit * 0.09 +
         mileageFit * 0.08 +
-        yearFit * 0.06 +
-        featureFit * 0.06 +
-        modificationFit * 0.03 +
-        purchaseConditionFit * 0.02,
+        yearFit * 0.07 +
+        transmissionFit * 0.05 +
+        featureFit * 0.05 +
+        modificationFit * 0.02 +
+        purchaseConditionFit * 0.01,
     ),
     resaleValue: Math.round(resaleFit),
   };
@@ -178,16 +191,25 @@ function scoreVehicle(vehicle: Vehicle, profile: BuyerProfile, maxPrice: number)
   return {
     ...vehicle,
     score: Math.round(clamp(score)),
+    matchSummary: {
+      overall: Math.round(clamp(score)),
+      affordability: scoreBreakdown.budgetFit,
+      reliability: scoreBreakdown.reliability,
+      safety: scoreBreakdown.safety,
+      ownershipCost: scoreBreakdown.insuranceCost,
+      practicality: scoreBreakdown.practicality,
+    },
     scoreBreakdown,
     weightedContributions,
     reasons: reasons.slice(0, 5),
     misses: misses.slice(0, 4),
     ownership: {
       insuranceMonthly: vehicle.insurance,
-      maintenanceMonthly: vehicle.maintenanceEstimate ?? estimateMaintenanceMonthly(vehicle),
-      fuelMonthly: Math.round(estimateFuelCost(vehicle, profile)),
-      depreciationAnnual: vehicle.depreciationEstimate ?? estimateDepreciationAnnual(vehicle),
+      maintenanceMonthly,
+      fuelMonthly,
+      depreciationAnnual,
     },
+    firstYearOwnership,
     buyingTips: getBuyingTips(vehicle, profile),
   };
 }
@@ -221,52 +243,172 @@ function getEffectiveMaxPrice(profile: BuyerProfile, estimatedBudget: number) {
 }
 
 function getBodyStyleFit(vehicle: Vehicle, profile: BuyerProfile) {
-  if (profile.bodyStyle === "any") return 82;
-  return vehicle.bodyType === profile.bodyStyle ? 100 : spaciousTypes.has(vehicle.bodyType) && profile.bodyStyle === "suv" ? 74 : 58;
+  if (profile.bodyStyle === "any") return beginnerFriendlyTypes.has(vehicle.bodyType) ? 82 : 70;
+  if (vehicle.bodyType === profile.bodyStyle) return 100;
+  if (profile.bodyStyle === "suv" && spaciousTypes.has(vehicle.bodyType)) return 68;
+  return 34;
 }
 
 function getDrivetrainFit(vehicle: Vehicle, profile: BuyerProfile) {
-  if (profile.drivetrainPreference === "any") return 82;
+  if (profile.drivetrainPreference === "any") {
+    if (profile.climate === "snow") return snowDrivetrains.has(vehicle.drivetrain) ? 92 : 45;
+    return snowDrivetrains.has(vehicle.drivetrain) ? 84 : 78;
+  }
   if (vehicle.drivetrain === profile.drivetrainPreference) return 100;
-  if (profile.drivetrainPreference === "4WD" && vehicle.drivetrain === "AWD") return 88;
-  if (profile.drivetrainPreference === "AWD" && vehicle.drivetrain === "4WD") return 84;
-  return 55;
+  if (profile.drivetrainPreference === "4WD" && vehicle.drivetrain === "AWD") return 82;
+  if (profile.drivetrainPreference === "AWD" && vehicle.drivetrain === "4WD") return 80;
+  return 28;
 }
 
 function getTransmissionFit(vehicle: Vehicle, profile: BuyerProfile) {
-  if (profile.transmissionPreference === "any") return 84;
-  if (profile.transmissionPreference === "automatic") return vehicle.transmission === "manual" ? 45 : 100;
-  return vehicle.transmission === "manual" ? 100 : 62;
+  if (profile.transmissionPreference === "any") return vehicle.transmission === "manual" ? 74 : 82;
+  if (profile.transmissionPreference === "automatic") return vehicle.transmission === "manual" ? 22 : 100;
+  return vehicle.transmission === "manual" ? 100 : 24;
 }
 
 function getCargoFit(vehicle: Vehicle, profile: BuyerProfile) {
-  if (profile.cargoNeed === "not-sure") return 80;
-  const target = profile.cargoNeed === "high" ? 82 : profile.cargoNeed === "medium" ? 62 : 40;
-  return clamp((vehicle.cargoScore / target) * 82);
+  if (profile.cargoNeed === "not-sure") return scaleRange(vehicle.cargoScore, 35, 88);
+  const target = profile.cargoNeed === "high" ? 86 : profile.cargoNeed === "medium" ? 66 : 38;
+  return scoreHigherAgainstTarget(vehicle.cargoScore, target, 0.68, 1.12);
 }
 
 function getClimateFit(vehicle: Vehicle, profile: BuyerProfile) {
   if (profile.climate === "not-sure" || profile.climate === "mild") return 82;
-  if (profile.climate === "snow") return snowDrivetrains.has(vehicle.drivetrain) ? 100 : 62;
-  if (profile.climate === "rain") return vehicle.safetyScore >= 85 || snowDrivetrains.has(vehicle.drivetrain) ? 96 : 74;
+  if (profile.climate === "snow") return snowDrivetrains.has(vehicle.drivetrain) ? 100 : 18;
+  if (profile.climate === "rain") return vehicle.safetyScore >= 88 || snowDrivetrains.has(vehicle.drivetrain) ? 96 : 64;
   return 82;
 }
 
 function getPurchaseConditionFit(vehicle: Vehicle, profile: BuyerProfile) {
   if (profile.purchaseCondition === "any") return 82;
-  if (profile.purchaseCondition === "new") return vehicle.year >= new Date().getFullYear() - 2 ? 100 : 52;
-  return vehicle.year < new Date().getFullYear() ? 100 : 72;
+  if (profile.purchaseCondition === "new") return vehicle.year >= new Date().getFullYear() - 2 ? 100 : 30;
+  return vehicle.year < new Date().getFullYear() ? 94 : 58;
 }
 
 function getModificationFit(vehicle: Vehicle, profile: BuyerProfile) {
   if (profile.modificationPlans !== "yes") return 82;
-  if (vehicle.bodyType === "truck" || vehicle.model.includes("Civic") || vehicle.model.includes("3")) return 95;
-  return 68;
+  if (vehicle.bodyType === "truck" || vehicle.model.includes("Civic") || vehicle.model.includes("3")) return 96;
+  if (vehicle.bodyType === "coupe" || vehicle.bodyType === "hatchback") return 88;
+  return 52;
 }
 
-function getImportanceFit(score: number, importance: number) {
-  if (!importance || importance <= 2) return 78 + score * 0.1;
-  return score;
+function getPaymentFit(estimatedPayment: number, paymentBudget: number, profile: BuyerProfile) {
+  if (profile.paymentMethod === "cash") return 82;
+  const target = paymentBudget || Math.max(120, profile.monthlyBudget * 0.42);
+  return scoreLowerCost(estimatedPayment, target, 0.62, 1.12);
+}
+
+function getInsuranceFit(vehicle: Vehicle, profile: BuyerProfile) {
+  const target = profile.insuranceBudget || Math.max(120, profile.monthlyBudget * 0.22);
+  return scoreLowerCost(vehicle.insurance, target, 0.68, 1.25);
+}
+
+function getOwnershipCostFit(ownershipMonthly: number, profile: BuyerProfile) {
+  const target = Math.max(180, profile.monthlyBudget * (profile.paymentMethod === "cash" ? 0.72 : 0.48));
+  return scoreLowerCost(ownershipMonthly, target, 0.55, 1.25);
+}
+
+function getMileageFit(vehicle: Vehicle, profile: BuyerProfile) {
+  if (profile.maxMileage) return scoreLowerCost(vehicle.mileage, profile.maxMileage, 0.45, 1.08);
+
+  const expectedMileage = Math.max(12000, (new Date().getFullYear() - vehicle.year) * 12000);
+  return scoreLowerCost(vehicle.mileage, expectedMileage, 0.55, 1.55);
+}
+
+function getYearFit(vehicle: Vehicle, profile: BuyerProfile) {
+  if (!profile.minYear) return scaleRange(vehicle.year, 2010, new Date().getFullYear());
+  if (vehicle.year < profile.minYear) return Math.max(8, 58 - (profile.minYear - vehicle.year) * 10);
+  return clamp(72 + (vehicle.year - profile.minYear) * 4);
+}
+
+function getFuelEconomyFit(vehicle: Vehicle, profile: BuyerProfile) {
+  const target = profile.minMpg || (profile.expectedAnnualMileage >= 12000 ? 32 : 26);
+  const base = scoreHigherAgainstTarget(vehicle.mpg, target, 0.72, vehicle.fuelType === "electric" ? 4.2 : 1.45);
+  const importance = profile.fuelEconomyImportance || 3;
+  return applyImportance(base, importance);
+}
+
+function getReliabilityFit(vehicle: Vehicle, profile: BuyerProfile) {
+  const base = scaleRange(vehicle.reliabilityScore, 66, 96);
+  const mileagePenalty = vehicle.mileage > 120000 ? 10 : vehicle.mileage > 90000 ? 5 : 0;
+  return applyImportance(base - mileagePenalty, profile.reliabilityImportance);
+}
+
+function getSafetyFit(vehicle: Vehicle, profile: BuyerProfile) {
+  const base = scaleRange(vehicle.safetyScore, 78, 94);
+  const importance = profile.safetyPriority === "maximum" ? 5 : profile.safetyPriority === "high" ? 4 : 3;
+  return applyImportance(base, importance);
+}
+
+function getPerformanceFit(vehicle: Vehicle, profile: BuyerProfile) {
+  const base = scaleRange(vehicle.performanceScore, 42, 90);
+  return applyImportance(base, profile.performanceImportance);
+}
+
+function getResaleFit(vehicle: Vehicle, profile: BuyerProfile) {
+  const base = scaleRange(vehicle.resaleScore, 58, 90);
+  return applyImportance(base, profile.resaleValueImportance);
+}
+
+function getFeatureFit(vehicle: Vehicle, profile: BuyerProfile) {
+  const base = scaleRange(vehicle.featureScore, 45, 90);
+  return applyImportance(base, profile.advancedFeaturesImportance);
+}
+
+function getFamilyFit(vehicle: Vehicle, profile: BuyerProfile) {
+  const seatsNeeded = Math.max(profile.familySize || 1, 1);
+  if (seatsNeeded <= 1) return scaleRange(vehicle.seats, 2, 7);
+  if (vehicle.seats < seatsNeeded) return 18;
+  return clamp(78 + Math.min(vehicle.seats - seatsNeeded, 3) * 7);
+}
+
+function estimateMonthlyPayment(vehicle: Vehicle, profile: BuyerProfile) {
+  if (profile.paymentMethod === "cash") return 0;
+  const amountFinanced = Math.max(0, vehicle.price * 1.08 - profile.downPayment);
+  const monthlyRate = profile.apr / 100 / 12;
+  if (!monthlyRate) return amountFinanced / Math.max(profile.loanTermMonths, 1);
+  return (amountFinanced * monthlyRate) / (1 - (1 + monthlyRate) ** -Math.max(profile.loanTermMonths, 1));
+}
+
+function scoreLowerCost(actual: number, target: number, idealRatio: number, maxRatio: number) {
+  if (!Number.isFinite(actual) || actual < 0) return 0;
+  if (!target || target <= 0) return 62;
+
+  const ratio = actual / target;
+  if (ratio <= idealRatio) return clamp(100 - ratio * 6);
+  if (ratio <= 1) return interpolate(ratio, idealRatio, 1, 96, 66);
+  if (ratio <= maxRatio) return interpolate(ratio, 1, maxRatio, 66, 18);
+  return Math.max(0, 18 - (ratio - maxRatio) * 35);
+}
+
+function scoreHigherAgainstTarget(actual: number, target: number, weakRatio: number, excellentRatio: number) {
+  if (!Number.isFinite(actual) || actual <= 0) return 0;
+  if (!target || target <= 0) return 68;
+
+  const ratio = actual / target;
+  if (ratio <= weakRatio) return interpolate(ratio, 0, weakRatio, 12, 48);
+  if (ratio <= 1) return interpolate(ratio, weakRatio, 1, 48, 76);
+  if (ratio <= excellentRatio) return interpolate(ratio, 1, excellentRatio, 76, 100);
+  return 100;
+}
+
+function scaleRange(value: number, low: number, high: number) {
+  if (!Number.isFinite(value)) return 0;
+  return clamp(((value - low) / Math.max(high - low, 1)) * 100);
+}
+
+function applyImportance(score: number, importance: number) {
+  const clamped = clamp(score);
+  if (!importance || importance <= 2) return clamp(62 + clamped * 0.32);
+  if (importance === 3) return clamped;
+  const exponent = importance >= 5 ? 1.32 : 1.16;
+  return clamp(Math.pow(clamped / 100, exponent) * 100);
+}
+
+function interpolate(value: number, inputMin: number, inputMax: number, outputMin: number, outputMax: number) {
+  if (inputMax === inputMin) return outputMax;
+  const progress = (value - inputMin) / (inputMax - inputMin);
+  return outputMin + (outputMax - outputMin) * progress;
 }
 
 function estimateFuelCost(vehicle: Vehicle, profile: BuyerProfile) {
@@ -337,36 +479,77 @@ function addFitNotes(
   vehicle: Vehicle,
   profile: BuyerProfile,
   maxPrice: number,
+  estimatedPayment: number,
+  ownershipMonthly: number,
+  fuelMonthly: number,
   reasons: string[],
   misses: string[],
 ) {
-  if (vehicle.price <= maxPrice) reasons.push("fits the current budget estimate");
-  else misses.push("price may stretch the current budget");
+  const price = formatCurrency(vehicle.price);
+  const budgetCap = formatCurrency(maxPrice);
+  const insurance = formatCurrency(vehicle.insurance);
+  const monthlyOwnership = formatCurrency(ownershipMonthly);
 
-  if (profile.purchaseCondition === "used" && vehicle.year < new Date().getFullYear()) reasons.push("fits a used-car search");
-  if (profile.paymentMethod === "cash") reasons.push("cash buying estimate keeps financing optional");
-  if (profile.paymentMethod === "financing") reasons.push("fits a financing-first comparison");
+  if (vehicle.price <= maxPrice) reasons.push(`${price} stays within your buying-power cap of ${budgetCap}`);
+  else misses.push(`${price} is above your buying-power cap of ${budgetCap}`);
 
-  if (vehicle.mpg >= profile.minMpg) reasons.push("fuel economy supports the mileage plan");
-  else if (profile.fuelEconomyImportance >= 4) misses.push("fuel economy may feel weak for this preference");
-
-  if (profile.reliabilityImportance >= 4 && vehicle.reliabilityScore >= 86) reasons.push("strong reliability fit");
-  if (profile.performanceImportance >= 4 && vehicle.performanceScore >= 70) reasons.push("has a stronger performance feel");
-  if (profile.cargoNeed === "high" && vehicle.cargoScore >= 80) reasons.push("cargo room fits the request");
-  if (profile.familySize > 4 && vehicle.seats < profile.familySize) misses.push("seating may be tight for the family size");
-
-  if (profile.drivetrainPreference !== "any" && vehicle.drivetrain === profile.drivetrainPreference) {
-    reasons.push(`matches ${profile.drivetrainPreference} preference`);
+  if (profile.purchaseCondition === "used" && vehicle.year < new Date().getFullYear()) {
+    reasons.push(`${vehicle.year} model year fits your used-car search`);
+  }
+  if (profile.purchaseCondition === "new" && vehicle.year >= new Date().getFullYear() - 1) {
+    reasons.push(`${vehicle.year} model year fits your new-car preference`);
+  }
+  if (profile.paymentMethod === "cash") reasons.push(`cash plan avoids an estimated ${formatCurrency(estimatedPayment)}/mo loan payment`);
+  if (profile.paymentMethod === "financing") {
+    reasons.push(`estimated payment is ${formatCurrency(estimatedPayment)}/mo before insurance, fuel, and maintenance`);
   }
 
-  if (profile.climate === "snow" && snowDrivetrains.has(vehicle.drivetrain)) reasons.push("better suited for snow");
-  if (profile.climate === "snow" && !snowDrivetrains.has(vehicle.drivetrain)) misses.push("snow traction may need tires or caution");
+  if (vehicle.insurance <= profile.insuranceBudget) reasons.push(`${insurance}/mo insurance estimate fits your ${formatCurrency(profile.insuranceBudget)}/mo cap`);
+  else misses.push(`${insurance}/mo insurance estimate is above your ${formatCurrency(profile.insuranceBudget)}/mo cap`);
 
-  if (profile.bodyStyle !== "any" && vehicle.bodyType === profile.bodyStyle) reasons.push(`matches ${profile.bodyStyle} style`);
-  if (profile.safetyPriority !== "not-sure" && vehicle.safetyScore >= 86) reasons.push("safety score fits the priority");
-  if (profile.resaleValueImportance >= 4 && vehicle.resaleScore >= 84) reasons.push("resale value is a strength");
-  if (profile.advancedFeaturesImportance >= 4 && vehicle.featureScore < 65) misses.push("advanced features may feel limited");
+  if (vehicle.mpg >= profile.minMpg) reasons.push(`${vehicle.mpg} MPG meets your ${profile.minMpg} MPG target`);
+  else if (profile.fuelEconomyImportance >= 4) misses.push(`${vehicle.mpg} MPG is below your ${profile.minMpg} MPG target`);
+
+  if (profile.expectedAnnualMileage >= 12000) {
+    reasons.push(`${formatCurrency(fuelMonthly)}/mo fuel estimate reflects your ${profile.expectedAnnualMileage.toLocaleString("en-US")} annual miles`);
+  }
+
+  if (profile.reliabilityImportance >= 4 && vehicle.reliabilityScore >= 86) {
+    reasons.push(`${vehicle.reliabilityScore}/100 reliability score supports your high reliability priority`);
+  }
+  if (profile.performanceImportance >= 4 && vehicle.performanceScore >= 70) {
+    reasons.push(`${vehicle.performanceScore}/100 performance score supports your sportier preference`);
+  }
+  if (profile.cargoNeed === "high" && vehicle.cargoScore >= 80) reasons.push(`${vehicle.cargoScore}/100 cargo score fits your high cargo need`);
+  if (profile.familySize > 4 && vehicle.seats < profile.familySize) {
+    misses.push(`${vehicle.seats} seats may be tight for a family size of ${profile.familySize}`);
+  }
+
+  if (profile.drivetrainPreference !== "any" && vehicle.drivetrain === profile.drivetrainPreference) {
+    reasons.push(`${vehicle.drivetrain} matches your drivetrain preference`);
+  }
+
+  if (profile.climate === "snow" && snowDrivetrains.has(vehicle.drivetrain)) reasons.push(`${vehicle.drivetrain} is a better match for snow`);
+  if (profile.climate === "snow" && !snowDrivetrains.has(vehicle.drivetrain)) misses.push(`${vehicle.drivetrain} may need winter tires for snow`);
+
+  if (profile.bodyStyle !== "any" && vehicle.bodyType === profile.bodyStyle) reasons.push(`${vehicle.bodyType} body style matches your request`);
+  if (profile.safetyPriority !== "not-sure" && vehicle.safetyScore >= 86) {
+    reasons.push(`${vehicle.safetyScore}/100 safety score fits your ${profile.safetyPriority} safety priority`);
+  }
+  if (profile.resaleValueImportance >= 4 && vehicle.resaleScore >= 84) reasons.push(`${vehicle.resaleScore}/100 resale score is a strength`);
+  if (profile.advancedFeaturesImportance >= 4 && vehicle.featureScore < 65) {
+    misses.push(`${vehicle.featureScore}/100 feature score may feel limited`);
+  }
+  reasons.push(`${monthlyOwnership}/mo estimated ownership cost combines insurance, maintenance, fuel, and depreciation`);
   if (!beginnerFriendlyTypes.has(vehicle.bodyType)) misses.push("may need extra first-car confidence checks");
+}
+
+function formatCurrency(value: number) {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: 0,
+  }).format(Math.round(value));
 }
 
 function clamp(value: number) {

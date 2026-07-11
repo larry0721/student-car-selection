@@ -36,6 +36,14 @@ export type Vehicle = {
 
 export type ScoredVehicle = Vehicle & {
   score: number;
+  matchSummary: {
+    overall: number;
+    affordability: number;
+    reliability: number;
+    safety: number;
+    ownershipCost: number;
+    practicality: number;
+  };
   scoreBreakdown: Record<keyof ScoreWeights, number>;
   weightedContributions: Record<keyof ScoreWeights, number>;
   reasons: string[];
@@ -45,6 +53,13 @@ export type ScoredVehicle = Vehicle & {
     maintenanceMonthly: number;
     fuelMonthly: number;
     depreciationAnnual: number;
+  };
+  firstYearOwnership: {
+    insurance: number;
+    maintenance: number;
+    fuel: number;
+    depreciation: number;
+    total: number;
   };
   similarAlternatives: string[];
   buyingTips: string[];

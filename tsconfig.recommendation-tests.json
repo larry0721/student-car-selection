@@ -1,0 +1,20 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "module": "commonjs",
+    "moduleResolution": "node",
+    "noEmit": false,
+    "outDir": "/private/tmp/student-car-selection-recommendation-tests",
+    "rootDir": ".",
+    "ignoreDeprecations": "6.0",
+    "types": ["node"]
+  },
+  "include": [
+    "scripts/test_recommendation_profiles.ts",
+    "lib/recommendations.ts",
+    "lib/affordability.ts",
+    "lib/data/vehicleValidation.ts",
+    "types/**/*.ts"
+  ],
+  "exclude": []
+}
