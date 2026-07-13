@@ -49,7 +49,7 @@ const defaultProfile: BuyerProfile = {
 };
 
 type NumericField = {
-  [Key in keyof BuyerProfile]: BuyerProfile[Key] extends number ? Key : never;
+  [Key in keyof BuyerProfile]-?: NonNullable<BuyerProfile[Key]> extends number ? Key : never;
 }[keyof BuyerProfile];
 
 type ScoreWeightField = keyof ScoreWeights;
@@ -617,8 +617,12 @@ function ComparisonView({ vehicles }: { vehicles: ScoredVehicle[] }) {
           <CompareRow label="Affordability" values={vehicles.map((vehicle) => `${vehicle.matchSummary.affordability}/100`)} />
           <CompareRow label="Reliability match" values={vehicles.map((vehicle) => `${vehicle.matchSummary.reliability}/100`)} />
           <CompareRow label="Safety match" values={vehicles.map((vehicle) => `${vehicle.matchSummary.safety}/100`)} />
-          <CompareRow label="Ownership cost" values={vehicles.map((vehicle) => `${vehicle.matchSummary.ownershipCost}/100`)} />
+          <CompareRow label="Fuel cost" values={vehicles.map((vehicle) => `${vehicle.matchSummary.fuelEnergyCost}/100`)} />
+          <CompareRow label="Insurance cost" values={vehicles.map((vehicle) => `${vehicle.matchSummary.insuranceCost}/100`)} />
+          <CompareRow label="Maintenance risk" values={vehicles.map((vehicle) => `${vehicle.matchSummary.maintenanceRisk}/100`)} />
           <CompareRow label="Practicality" values={vehicles.map((vehicle) => `${vehicle.matchSummary.practicality}/100`)} />
+          <CompareRow label="Driving fit" values={vehicles.map((vehicle) => `${vehicle.matchSummary.drivingPreferenceFit}/100`)} />
+          <CompareRow label="Confidence" values={vehicles.map((vehicle) => `${vehicle.confidence.score}/100 ${vehicle.confidence.level}`)} />
           <CompareRow label="Price" values={vehicles.map((vehicle) => formatMoney(vehicle.price))} />
           <CompareRow label="Mileage" values={vehicles.map((vehicle) => formatNumber(vehicle.mileage))} />
           <CompareRow label="Insurance" values={vehicles.map((vehicle) => `${formatMoney(vehicle.ownership.insuranceMonthly)}/mo`)} />

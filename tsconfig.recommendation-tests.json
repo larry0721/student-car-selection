@@ -7,10 +7,15 @@
     "outDir": "/private/tmp/student-car-selection-recommendation-tests",
     "rootDir": ".",
     "ignoreDeprecations": "6.0",
-    "types": ["node"]
+    "types": ["node"],
+    "plugins": []
   },
   "include": [
     "scripts/test_recommendation_profiles.ts",
+    "scripts/test_recommendation_objects.ts",
+    "scripts/test_qualification_engine.ts",
+    "scripts/test_candidate_pipeline.ts",
+    "scripts/test_priority_scaling_decision_report.ts",
     "lib/recommendations.ts",
     "lib/affordability.ts",
     "lib/data/vehicleValidation.ts",

@@ -10,7 +10,11 @@
     "lint": "eslint app components data lib types next.config.ts tailwind.config.ts",
     "typecheck": "tsc --noEmit",
     "test:data": "node --experimental-strip-types scripts/test_vehicle_validation.mjs",
-    "test:recommendations": "tsc -p tsconfig.recommendation-tests.json && node /private/tmp/student-car-selection-recommendation-tests/scripts/test_recommendation_profiles.js"
+    "test:recommendations": "tsc -p tsconfig.recommendation-tests.json && node /private/tmp/student-car-selection-recommendation-tests/scripts/test_recommendation_profiles.js",
+    "test:recommendation-objects": "tsc -p tsconfig.recommendation-tests.json && node /private/tmp/student-car-selection-recommendation-tests/scripts/test_recommendation_objects.js",
+    "test:qualification": "tsc -p tsconfig.recommendation-tests.json && node /private/tmp/student-car-selection-recommendation-tests/scripts/test_qualification_engine.js",
+    "test:pipeline": "tsc -p tsconfig.recommendation-tests.json && node /private/tmp/student-car-selection-recommendation-tests/scripts/test_candidate_pipeline.js",
+    "test:decision-report": "tsc -p tsconfig.recommendation-tests.json && node /private/tmp/student-car-selection-recommendation-tests/scripts/test_priority_scaling_decision_report.js"
   },
   "dependencies": {
     "@supabase/supabase-js": "2.108.2",

@@ -6,7 +6,7 @@ A portfolio-ready personalized car advisor for first-time buyers, built with Nex
 
 The app starts with an optional advisor intake. Users can answer as much or as little as they want, add free-form requirements, and search for car recommendations that match their profile. Results include top vehicle matches, compatibility scoring, reliability and safety estimates, insurance and maintenance estimates, fuel-cost estimates, depreciation context, common issues, pros and cons, similar alternatives, and buying tips.
 
-Recommendations use a weighted scoring model. The default weights are budget fit 30%, reliability 20%, safety 15%, fuel economy 10%, insurance cost 10%, performance 5%, practicality 5%, and resale value 5%. Advanced users can adjust those weights and import score overlays from CSV.
+Recommendations use a deterministic weighted scoring model with hard-constraint filtering, visible penalties, and confidence shown separately from match score. The default weights are affordability 25%, reliability 15%, safety 15%, fuel and energy cost 10%, insurance cost 10%, maintenance risk 10%, practicality 7%, resale value 5%, and driving preference fit 3%. Advanced users can adjust those weights and import score overlays from CSV.
 
 The data layer supports live enrichment from NHTSA vPIC, FuelEconomy.gov, and used-car marketplace/listing APIs. NHTSA and FuelEconomy.gov work without keys. Marketplace listings, prices, and verified photos require a provider key such as Marketcheck, or a custom API configured with `USED_CAR_API_BASE_URL`. Users can optionally import CSV score overlays for reliability, safety, insurance, maintenance, MPG, and common issues.
 

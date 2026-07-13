@@ -77,6 +77,7 @@ export function RecommendationCard({
           <Stat label="Mileage" value={formatNumber(vehicle.mileage)} />
           <Stat label="Match" value={`${vehicle.matchSummary.overall}/100`} />
           <Stat label="Ownership" value={`${formatMoney(ownershipMonthly)}/mo`} />
+          <Stat label="Confidence" value={`${vehicle.confidence.score}/100 ${vehicle.confidence.level}`} />
         </div>
 
         <div>
@@ -103,8 +104,12 @@ export function RecommendationCard({
                 <ScoreTile label="Affordability" value={`${vehicle.matchSummary.affordability}/100`} />
                 <ScoreTile label="Reliability" value={`${vehicle.matchSummary.reliability}/100`} />
                 <ScoreTile label="Safety" value={`${vehicle.matchSummary.safety}/100`} />
-                <ScoreTile label="Ownership" value={`${vehicle.matchSummary.ownershipCost}/100`} />
+                <ScoreTile label="Fuel cost" value={`${vehicle.matchSummary.fuelEnergyCost}/100`} />
+                <ScoreTile label="Insurance" value={`${vehicle.matchSummary.insuranceCost}/100`} />
+                <ScoreTile label="Maintenance" value={`${vehicle.matchSummary.maintenanceRisk}/100`} />
                 <ScoreTile label="Practicality" value={`${vehicle.matchSummary.practicality}/100`} />
+                <ScoreTile label="Driving fit" value={`${vehicle.matchSummary.drivingPreferenceFit}/100`} />
+                <ScoreTile label="Confidence" value={`${vehicle.confidence.score}/100`} />
               </div>
 
               <dl className="grid grid-cols-2 gap-2 text-sm">
@@ -149,9 +154,46 @@ export function RecommendationCard({
                       contribution={vehicle.weightedContributions[field]}
                       key={field}
                       label={scoreWeightLabels[field]}
+                      weight={vehicle.categoryWeights[field]}
                     />
                   ))}
                 </div>
+              </div>
+
+              <div className="grid gap-3 md:grid-cols-2">
+                <NoteList
+                  title="Hard constraints"
+                  items={[
+                    `Qualification status: ${vehicle.recommendation.qualificationStatus}.`,
+                    ...vehicle.hardConstraintStatus.checked.map((item) => `Checked: ${item}`),
+                    ...vehicle.recommendation.hardConstraintResults
+                      .filter((constraint) => !constraint.passed)
+                      .map((constraint) => constraint.exclusionReason || `${constraint.label} failed.`),
+                  ]}
+                />
+                <NoteList
+                  title="Confidence"
+                  items={[`${vehicle.confidence.level} confidence (${vehicle.confidence.score}/100)`, ...vehicle.confidence.reasons]}
+                />
+              </div>
+
+              <div className="grid gap-3 md:grid-cols-2">
+                <NoteList
+                  title="Positive contributions"
+                  items={vehicle.positiveContributions.map(
+                    (contribution) =>
+                      `${contribution.label}: ${contribution.score}/100 at ${contribution.weight}% weight contributed +${contribution.points}.`,
+                  )}
+                />
+                <NoteList
+                  title="Penalties"
+                  items={vehicle.penalties.map((penalty) => `${penalty.label}: -${penalty.points}. ${penalty.reason}`)}
+                />
+              </div>
+
+              <div className="grid gap-3 md:grid-cols-2">
+                <NoteList title="Assumptions" items={vehicle.assumptions} />
+                <NoteList title="Missing data warnings" items={vehicle.missingDataWarnings} />
               </div>
 
               <div className="grid gap-3 md:grid-cols-2">
@@ -208,17 +250,19 @@ function ScoreBreakdownRow({
   label,
   categoryScore,
   contribution,
+  weight,
 }: {
   label: string;
   categoryScore: number;
   contribution: number;
+  weight: number;
 }) {
   return (
     <div className="grid gap-1">
       <div className="flex items-center justify-between gap-3 text-xs font-bold uppercase tracking-[0.08em] text-slate-400">
         <span>{label}</span>
         <span className="text-slate-300">
-          {categoryScore}/100 · +{contribution}
+          {categoryScore}/100 · {Math.round(weight)}% · +{contribution}
         </span>
       </div>
       <div className="h-1.5 overflow-hidden rounded-full bg-white/10">
@@ -245,7 +289,7 @@ function NoteList({ title, items }: { title: string; items: string[] }) {
     <div>
       <h4 className="mb-2 text-xs font-black uppercase tracking-[0.1em] text-slate-400">{title}</h4>
       <ul className="space-y-1.5 pl-4 text-sm font-medium leading-5 text-slate-300">
-        {items.map((item, index) => (
+        {(items.length ? items : ["None."]).map((item, index) => (
           <li className="list-disc" key={`${item}-${index}`}>
             {item}
           </li>

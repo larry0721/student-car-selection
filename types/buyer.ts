@@ -1,13 +1,32 @@
 export type ScoreWeights = {
-  budgetFit: number;
+  affordability: number;
   reliability: number;
   safety: number;
-  fuelEconomy: number;
+  fuelEnergyCost: number;
   insuranceCost: number;
-  performance: number;
+  maintenanceRisk: number;
   practicality: number;
   resaleValue: number;
+  drivingPreferenceFit: number;
 };
+
+export type ImportanceLevel = "low" | "normal" | "important" | "very-important";
+
+export type ConstraintKey =
+  | "totalBudget"
+  | "monthlyPayment"
+  | "make"
+  | "purchaseCondition"
+  | "bodyStyle"
+  | "drivetrain"
+  | "maxMileage"
+  | "minYear"
+  | "transmission"
+  | "seating"
+  | "fuelType"
+  | "reliabilityMinimum"
+  | "safetyMinimum"
+  | "performanceMinimum";
 
 export type BuyerProfile = {
   maxPurchaseBudget: number;
@@ -37,6 +56,14 @@ export type BuyerProfile = {
   advancedFeaturesImportance: number;
   safetyPriority: "not-sure" | "standard" | "high" | "maximum";
   scoreWeights: ScoreWeights;
+  requiredMake?: string;
+  preferredMake?: string;
+  requiredFuelType?: "gas" | "hybrid" | "electric" | "diesel";
+  reliabilityMinimum?: number;
+  safetyMinimum?: number;
+  performanceMinimum?: number;
+  flexibleConstraints?: ConstraintKey[];
+  allowCompromises?: boolean;
 };
 
 export type BudgetSummary = {

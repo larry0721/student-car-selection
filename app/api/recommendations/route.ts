@@ -50,7 +50,7 @@ async function getOpenAiRecommendations(payload: RecommendationRequest): Promise
         {
           role: "system",
           content:
-            "You are a careful first-car buying advisor. Return concise JSON only. Do not recommend unsafe or unaffordable choices.",
+            "You are a careful first-car buying advisor. Return concise JSON only. Use the provided deterministic scores, hard-constraint status, penalties, confidence, assumptions, and source warnings. Do not invent numerical rankings or claim a vehicle passed a constraint it failed.",
         },
         {
           role: "user",
@@ -78,6 +78,13 @@ async function getOpenAiRecommendations(payload: RecommendationRequest): Promise
               score: vehicle.score,
               scoreBreakdown: vehicle.scoreBreakdown,
               weightedContributions: vehicle.weightedContributions,
+              categoryWeights: vehicle.categoryWeights,
+              positiveContributions: vehicle.positiveContributions,
+              penalties: vehicle.penalties,
+              hardConstraintStatus: vehicle.hardConstraintStatus,
+              assumptions: vehicle.assumptions,
+              missingDataWarnings: vehicle.missingDataWarnings,
+              confidence: vehicle.confidence,
               reliabilityScore: vehicle.reliabilityScore,
               safetyScore: vehicle.safetyScore,
               ownership: vehicle.ownership,
@@ -86,6 +93,7 @@ async function getOpenAiRecommendations(payload: RecommendationRequest): Promise
               commonIssues: vehicle.commonIssues,
               similarAlternatives: vehicle.similarAlternatives,
               buyingTips: vehicle.buyingTips,
+              recommendation: vehicle.recommendation,
             })),
           }),
         },
