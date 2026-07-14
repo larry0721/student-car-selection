@@ -2,12 +2,14 @@
 
 import { type ReactNode, useMemo, useState } from "react";
 import { DataImportPanel } from "@/components/DataImportPanel";
-import { RecommendationCard } from "@/components/RecommendationCard";
+import { VisibleIntelligenceResults } from "@/components/VisibleIntelligenceResults";
 import { vehicleCatalog } from "@/data/vehicleCatalog";
 import { calculateBudget, formatMoney, formatNumber } from "@/lib/affordability";
 import { mergeVehicleData } from "@/lib/data/mergeVehicleData";
 import {
+  buildDecisionReport,
   defaultScoreWeights,
+  getRecommendationDecisionSet,
   getRequirementMatches,
   getVehicleRequirementMisses,
   normalizeScoreWeights,
@@ -58,7 +60,7 @@ type AppView = "advisor" | "compare" | "advanced";
 export function BuyerProfilePlanner() {
   const [activeView, setActiveView] = useState<AppView>("advisor");
   const [profile, setProfile] = useState<BuyerProfile>(defaultProfile);
-  const [aiRecommendations, setAiRecommendations] = useState<AiRecommendation[]>([]);
+  const [, setAiRecommendations] = useState<AiRecommendation[]>([]);
   const [aiStatus, setAiStatus] = useState("Answer a few questions or browse the draft matches.");
   const [isPersonalizing, setIsPersonalizing] = useState(false);
   const [importedOverlays, setImportedOverlays] = useState<VehicleDataOverlay[]>([]);
@@ -77,8 +79,12 @@ export function BuyerProfilePlanner() {
   );
   const matchedVehicles = useMemo(() => getRequirementMatches(profile, enrichedVehicles), [profile, enrichedVehicles]);
   const rankedVehicles = useMemo(() => rankVehicles(profile, matchedVehicles).slice(0, 10), [profile, matchedVehicles]);
+  const recommendationDecisionSet = useMemo(
+    () => getRecommendationDecisionSet(profile, enrichedVehicles),
+    [profile, enrichedVehicles],
+  );
+  const decisionReport = useMemo(() => buildDecisionReport(recommendationDecisionSet), [recommendationDecisionSet]);
   const normalizedWeights = useMemo(() => normalizeScoreWeights(profile.scoreWeights), [profile.scoreWeights]);
-  const aiByVehicleId = new Map(aiRecommendations.map((item) => [item.vehicleId, item]));
   const answeredCount = getAnsweredCount(profile);
   const comparedVehicles = getComparedVehicles(rankedVehicles, compareIds);
   const hasNoMatch = rankedVehicles.length === 0;
@@ -512,17 +518,14 @@ export function BuyerProfilePlanner() {
               {hasNoMatch ? (
                 <NoMatchPanel reasons={noMatchReasons} />
               ) : (
-                <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-3">
-                  {rankedVehicles.slice(0, 3).map((vehicle) => (
-                    <RecommendationCard
-                      aiRecommendation={aiByVehicleId.get(vehicle.id)}
-                      isCompared={compareIds.includes(vehicle.id)}
-                      key={vehicle.id}
-                      onToggleCompare={toggleCompare}
-                      vehicle={vehicle}
-                    />
-                  ))}
-                </div>
+                <VisibleIntelligenceResults
+                  compareIds={compareIds}
+                  decisionReport={decisionReport}
+                  decisionSet={recommendationDecisionSet}
+                  onToggleCompare={toggleCompare}
+                  profile={profile}
+                  rankedVehicles={rankedVehicles}
+                />
               )}
             </section>
           </>
@@ -638,20 +641,23 @@ function ComparisonView({ vehicles }: { vehicles: ScoredVehicle[] }) {
 
 function NoMatchPanel({ reasons = [] }: { reasons?: string[] }) {
   return (
-    <section className="rounded-lg border border-amber-300/25 bg-amber-300/10 p-5">
-      <h3 className="text-xl font-black text-amber-100">No match</h3>
-      <p className="mt-2 max-w-3xl text-sm font-semibold leading-6 text-amber-50/80">
-        No cars satisfy every selected requirement. Loosen one or more strict filters like budget,
-        MPG, mileage, body style, drivetrain, transmission, safety priority, or written requirements,
-        then run Search matches again.
+    <section className="rounded-lg border border-amber-300/25 bg-amber-300/10 p-5 shadow-[0_24px_70px_rgba(0,0,0,0.22)]">
+      <p className="text-xs font-black uppercase tracking-[0.16em] text-amber-100">Advisor result</p>
+      <h3 className="mt-2 text-2xl font-black tracking-tight text-amber-50">I do not have a responsible match yet.</h3>
+      <p className="mt-3 max-w-3xl text-sm font-semibold leading-6 text-amber-50/85">
+        I would rather show no recommendation than force a car that violates your selected requirements.
+        Relax one strict filter, then run Search matches again so the shortlist stays honest.
       </p>
       {reasons.length ? (
-        <div className="mt-4 grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+        <div className="mt-5">
+          <h4 className="text-xs font-black uppercase tracking-[0.12em] text-amber-100/80">Most likely blockers</h4>
+          <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-3">
           {reasons.map((reason) => (
             <div className="rounded-lg border border-amber-200/15 bg-slate-950/30 px-3 py-2 text-sm font-bold text-amber-50" key={reason}>
               {reason}
             </div>
           ))}
+          </div>
         </div>
       ) : null}
     </section>
