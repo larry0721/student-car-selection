@@ -5,7 +5,7 @@
   "packageManager": "pnpm@11.7.0",
   "scripts": {
     "dev": "next dev --webpack",
-    "build": "next build --webpack",
+    "build": "next build --turbopack",
     "start": "next start",
     "lint": "eslint app components data lib types next.config.ts tailwind.config.ts",
     "typecheck": "tsc -p tsconfig.typecheck.json --noEmit",
@@ -15,7 +15,12 @@
     "test:qualification": "tsc -p tsconfig.recommendation-tests.json && node /private/tmp/student-car-selection-recommendation-tests/scripts/test_qualification_engine.js",
     "test:pipeline": "tsc -p tsconfig.recommendation-tests.json && node /private/tmp/student-car-selection-recommendation-tests/scripts/test_candidate_pipeline.js",
     "test:decision-report": "tsc -p tsconfig.recommendation-tests.json && node /private/tmp/student-car-selection-recommendation-tests/scripts/test_priority_scaling_decision_report.js",
-    "test:advisor": "tsc -p tsconfig.recommendation-tests.json && node /private/tmp/student-car-selection-recommendation-tests/scripts/test_advisor_conversation.js"
+    "test:advisor": "tsc -p tsconfig.recommendation-tests.json && node /private/tmp/student-car-selection-recommendation-tests/scripts/test_advisor_conversation.js",
+    "test:preference-interpretation": "tsc -p tsconfig.recommendation-tests.json && node /private/tmp/student-car-selection-recommendation-tests/scripts/test_preference_interpretation.js",
+    "test:conversation-intake": "tsc -p tsconfig.recommendation-tests.json && node /private/tmp/student-car-selection-recommendation-tests/scripts/test_conversation_intake.js",
+    "test:confirmation-flow": "tsc -p tsconfig.recommendation-tests.json && node /private/tmp/student-car-selection-recommendation-tests/scripts/test_confirmation_flow.js",
+    "test:confirmed-profile-integration": "tsc -p tsconfig.recommendation-tests.json && node /private/tmp/student-car-selection-recommendation-tests/scripts/test_confirmed_profile_integration.js",
+    "test:fine-tune-sync": "tsc -p tsconfig.recommendation-tests.json && node /private/tmp/student-car-selection-recommendation-tests/scripts/test_fine_tune_sync.js"
   },
   "dependencies": {
     "@supabase/supabase-js": "2.108.2",

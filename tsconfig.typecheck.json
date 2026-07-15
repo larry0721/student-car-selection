@@ -4,7 +4,7 @@
     "plugins": []
   },
   "include": [
-    "next-env.d.ts",
+    "types/source-next-env.d.ts",
     "next.config.ts",
     "tailwind.config.ts",
     "app/**/*.ts",
@@ -13,14 +13,12 @@
     "components/**/*.tsx",
     "data/**/*.ts",
     "lib/**/*.ts",
-    "types/**/*.ts",
-    ".next/types/**/*.ts",
-    ".next/dev/types/**/*.ts"
+    "types/**/*.ts"
   ],
   "exclude": [
     "node_modules",
     "data/raw",
     "data/database",
-    ".next/dev"
+    ".next"
   ]
 }

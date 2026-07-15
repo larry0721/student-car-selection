@@ -1,12 +1,14 @@
 # First Car Advisor
 
-A portfolio-ready personalized car advisor for first-time buyers, built with Next.js, TypeScript, Tailwind CSS, Supabase, and the OpenAI API.
+A portfolio-ready personalized car advisor for first-time buyers, built with Next.js, TypeScript, Tailwind CSS, Supabase-ready data modeling, and optional OpenAI API routes.
 
 ## What It Does
 
-The app starts with an optional advisor intake. Users can answer as much or as little as they want, add free-form requirements, and search for car recommendations that match their profile. Results include top vehicle matches, compatibility scoring, reliability and safety estimates, insurance and maintenance estimates, fuel-cost estimates, depreciation context, common issues, pros and cons, similar alternatives, and buying tips.
+The app starts with a conversation-first advisor. Users describe what they want in natural language, answer focused clarification questions, review the preferences the advisor understood, and confirm or correct those preferences before the catalog is evaluated. Detailed controls remain available as optional fine-tuning after the recommendation.
 
-Recommendations use a deterministic weighted scoring model with hard-constraint filtering, visible penalties, and confidence shown separately from match score. The default weights are affordability 25%, reliability 15%, safety 15%, fuel and energy cost 10%, insurance cost 10%, maintenance risk 10%, practicality 7%, resale value 5%, and driving preference fit 3%. Advanced users can adjust those weights and import score overlays from CSV.
+Results include the recommended vehicle, why it was selected, compatibility scoring, reliability and safety estimates, insurance and maintenance estimates, fuel-cost estimates, depreciation context, common issues, pros and cons, similar alternatives, and buying tips.
+
+Recommendations use a deterministic weighted scoring model with hard-constraint filtering, visible penalties, and confidence shown separately from match score. The conversation layer prepares a confirmed `BuyerProfile`; it does not choose winners or invent ranking explanations. The default weights are affordability 25%, reliability 15%, safety 15%, fuel and energy cost 10%, insurance cost 10%, maintenance risk 10%, practicality 7%, resale value 5%, and driving preference fit 3%. Advanced users can adjust those weights and import score overlays from CSV.
 
 The data layer supports live enrichment from NHTSA vPIC, FuelEconomy.gov, and used-car marketplace/listing APIs. NHTSA and FuelEconomy.gov work without keys. Marketplace listings, prices, and verified photos require a provider key such as Marketcheck, or a custom API configured with `USED_CAR_API_BASE_URL`. Users can optionally import CSV score overlays for reliability, safety, insurance, maintenance, MPG, and common issues.
 
@@ -16,7 +18,8 @@ The data layer supports live enrichment from NHTSA vPIC, FuelEconomy.gov, and us
 - TypeScript
 - Tailwind CSS
 - Supabase schema for normalized car data
-- OpenAI API for natural-language preference parsing and recommendation explanations
+- Deterministic natural-language preference interpretation and grounded advisor explanations
+- Optional OpenAI API route compatibility
 - NHTSA vPIC, FuelEconomy.gov, and optional used-car listing APIs
 - Vercel deployment
 
@@ -45,6 +48,8 @@ Run checks before publishing changes:
 pnpm typecheck
 pnpm lint
 ```
+
+See `docs/conversation-first-advisor-flow.md` for the implemented Phase 2.4 advisor flow and known limitations.
 
 ## Data Notes
 
