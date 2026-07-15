@@ -16,7 +16,9 @@
     "scripts/test_qualification_engine.ts",
     "scripts/test_candidate_pipeline.ts",
     "scripts/test_priority_scaling_decision_report.ts",
+    "scripts/test_advisor_conversation.ts",
     "lib/recommendations.ts",
+    "lib/advisorConversation.ts",
     "lib/affordability.ts",
     "lib/data/vehicleValidation.ts",
     "types/**/*.ts"

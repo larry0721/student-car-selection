@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { AdvisorConversationPanel } from "@/components/AdvisorConversationPanel";
 import { formatMoney, formatNumber } from "@/lib/affordability";
 import { scoreWeightLabels } from "@/lib/recommendations";
 import type { BuyerProfile } from "@/types/buyer";
@@ -145,6 +146,8 @@ export function VisibleIntelligenceResults({
           </div>
         </div>
       </section>
+
+      <AdvisorConversationPanel decisionReport={decisionReport} decisionSet={decisionSet} profile={profile} />
 
       <section className="rounded-lg border border-white/10 bg-white/[0.05] p-4 md:p-5">
         <SectionHeader eyebrow="Alternative Perspectives" title="The same recommendation set viewed four ways." />
@@ -428,7 +431,7 @@ function TradeoffList({ tradeoffs }: { tradeoffs: RecommendationTradeoff[] }) {
             </li>
           ))
         ) : (
-          <li>No major tradeoff was recorded.</li>
+          <li>The tradeoffs are relatively small under the current priorities.</li>
         )}
       </ul>
     </div>
@@ -509,7 +512,12 @@ function getStrengthLabel(score: number) {
 
 function getBiggestTradeoff(recommendation: RecommendationObject) {
   const tradeoff = [...recommendation.tradeoffs].sort((a, b) => b.penaltyPoints - a.penaltyPoints)[0];
-  if (!tradeoff) return "no major compromise was recorded for the top recommendation.";
+  if (!tradeoff) {
+    if (recommendation.dataQualityConfidence.level !== "high" || recommendation.missingInformation.length) {
+      return "the live listing condition still needs to be verified.";
+    }
+    return "the tradeoffs are relatively small under your current priorities.";
+  }
   return `${formatFieldLabel(tradeoff.field).toLowerCase()} is ${String(tradeoff.vehicleValue)}${
     tradeoff.userPreference !== undefined ? ` versus your target ${String(tradeoff.userPreference)}` : ""
   }.`;

@@ -1,6 +1,7 @@
 "use client";
 
 import { type ReactNode, useMemo, useState } from "react";
+import { AdvisorConversationPanel } from "@/components/AdvisorConversationPanel";
 import { DataImportPanel } from "@/components/DataImportPanel";
 import { VisibleIntelligenceResults } from "@/components/VisibleIntelligenceResults";
 import { vehicleCatalog } from "@/data/vehicleCatalog";
@@ -516,7 +517,7 @@ export function BuyerProfilePlanner() {
               </div>
 
               {hasNoMatch ? (
-                <NoMatchPanel reasons={noMatchReasons} />
+                <NoMatchPanel decisionReport={decisionReport} decisionSet={recommendationDecisionSet} profile={profile} reasons={noMatchReasons} />
               ) : (
                 <VisibleIntelligenceResults
                   compareIds={compareIds}
@@ -531,7 +532,9 @@ export function BuyerProfilePlanner() {
           </>
         ) : null}
 
-        {activeView === "compare" ? <ComparisonView vehicles={comparedVehicles} /> : null}
+        {activeView === "compare" ? (
+          <ComparisonView decisionReport={decisionReport} decisionSet={recommendationDecisionSet} profile={profile} vehicles={comparedVehicles} />
+        ) : null}
 
         {activeView === "advanced" ? (
           <section className="grid gap-4">
@@ -572,7 +575,17 @@ export function BuyerProfilePlanner() {
   );
 }
 
-function ComparisonView({ vehicles }: { vehicles: ScoredVehicle[] }) {
+function ComparisonView({
+  decisionReport,
+  decisionSet,
+  profile,
+  vehicles,
+}: {
+  decisionReport: ReturnType<typeof buildDecisionReport>;
+  decisionSet: ReturnType<typeof getRecommendationDecisionSet>;
+  profile: BuyerProfile;
+  vehicles: ScoredVehicle[];
+}) {
   if (!vehicles.length) {
     return (
       <section className="grid gap-4">
@@ -580,7 +593,7 @@ function ComparisonView({ vehicles }: { vehicles: ScoredVehicle[] }) {
           <h2 className="text-2xl font-black text-white">Side-by-side comparison</h2>
           <p className="text-sm font-semibold text-slate-400">No match. There are no cars to compare under the current requirements.</p>
         </div>
-        <NoMatchPanel />
+        <NoMatchPanel decisionReport={decisionReport} decisionSet={decisionSet} profile={profile} />
       </section>
     );
   }
@@ -639,28 +652,41 @@ function ComparisonView({ vehicles }: { vehicles: ScoredVehicle[] }) {
   );
 }
 
-function NoMatchPanel({ reasons = [] }: { reasons?: string[] }) {
+function NoMatchPanel({
+  decisionReport,
+  decisionSet,
+  profile,
+  reasons = [],
+}: {
+  decisionReport: ReturnType<typeof buildDecisionReport>;
+  decisionSet: ReturnType<typeof getRecommendationDecisionSet>;
+  profile: BuyerProfile;
+  reasons?: string[];
+}) {
   return (
-    <section className="rounded-lg border border-amber-300/25 bg-amber-300/10 p-5 shadow-[0_24px_70px_rgba(0,0,0,0.22)]">
-      <p className="text-xs font-black uppercase tracking-[0.16em] text-amber-100">Advisor result</p>
-      <h3 className="mt-2 text-2xl font-black tracking-tight text-amber-50">I do not have a responsible match yet.</h3>
-      <p className="mt-3 max-w-3xl text-sm font-semibold leading-6 text-amber-50/85">
-        I would rather show no recommendation than force a car that violates your selected requirements.
-        Relax one strict filter, then run Search matches again so the shortlist stays honest.
-      </p>
-      {reasons.length ? (
-        <div className="mt-5">
-          <h4 className="text-xs font-black uppercase tracking-[0.12em] text-amber-100/80">Most likely blockers</h4>
-          <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-3">
-          {reasons.map((reason) => (
-            <div className="rounded-lg border border-amber-200/15 bg-slate-950/30 px-3 py-2 text-sm font-bold text-amber-50" key={reason}>
-              {reason}
+    <div className="grid gap-4">
+      <section className="rounded-lg border border-amber-300/25 bg-amber-300/10 p-5 shadow-[0_24px_70px_rgba(0,0,0,0.22)]">
+        <p className="text-xs font-black uppercase tracking-[0.16em] text-amber-100">Advisor result</p>
+        <h3 className="mt-2 text-2xl font-black tracking-tight text-amber-50">I do not have a responsible match yet.</h3>
+        <p className="mt-3 max-w-3xl text-sm font-semibold leading-6 text-amber-50/85">
+          I would rather show no recommendation than force a car that violates your selected requirements.
+          Relax one strict filter, then run Search matches again so the shortlist stays honest.
+        </p>
+        {reasons.length ? (
+          <div className="mt-5">
+            <h4 className="text-xs font-black uppercase tracking-[0.12em] text-amber-100/80">Most likely blockers</h4>
+            <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+              {reasons.map((reason) => (
+                <div className="rounded-lg border border-amber-200/15 bg-slate-950/30 px-3 py-2 text-sm font-bold text-amber-50" key={reason}>
+                  {reason}
+                </div>
+              ))}
             </div>
-          ))}
           </div>
-        </div>
-      ) : null}
-    </section>
+        ) : null}
+      </section>
+      <AdvisorConversationPanel decisionReport={decisionReport} decisionSet={decisionSet} profile={profile} />
+    </div>
   );
 }
 

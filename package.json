@@ -14,7 +14,8 @@
     "test:recommendation-objects": "tsc -p tsconfig.recommendation-tests.json && node /private/tmp/student-car-selection-recommendation-tests/scripts/test_recommendation_objects.js",
     "test:qualification": "tsc -p tsconfig.recommendation-tests.json && node /private/tmp/student-car-selection-recommendation-tests/scripts/test_qualification_engine.js",
     "test:pipeline": "tsc -p tsconfig.recommendation-tests.json && node /private/tmp/student-car-selection-recommendation-tests/scripts/test_candidate_pipeline.js",
-    "test:decision-report": "tsc -p tsconfig.recommendation-tests.json && node /private/tmp/student-car-selection-recommendation-tests/scripts/test_priority_scaling_decision_report.js"
+    "test:decision-report": "tsc -p tsconfig.recommendation-tests.json && node /private/tmp/student-car-selection-recommendation-tests/scripts/test_priority_scaling_decision_report.js",
+    "test:advisor": "tsc -p tsconfig.recommendation-tests.json && node /private/tmp/student-car-selection-recommendation-tests/scripts/test_advisor_conversation.js"
   },
   "dependencies": {
     "@supabase/supabase-js": "2.108.2",
