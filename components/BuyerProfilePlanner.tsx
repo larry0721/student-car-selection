@@ -353,8 +353,8 @@ export function BuyerProfilePlanner() {
     setAiRecommendations([]);
     setAiStatus(
       overlays.length
-        ? `Imported ${overlays.length} CSV overlay${overlays.length === 1 ? "" : "s"}${warnings.length ? ` (${warnings.length} warning${warnings.length === 1 ? "" : "s"})` : ""}.`
-        : warnings[0] || "No CSV overlays were imported.",
+        ? `Imported ${overlays.length} custom score row${overlays.length === 1 ? "" : "s"}${warnings.length ? ` (${warnings.length} warning${warnings.length === 1 ? "" : "s"})` : ""}.`
+        : warnings[0] || "No custom score rows were imported.",
     );
   }
 
@@ -404,7 +404,7 @@ export function BuyerProfilePlanner() {
       setAiStatus(
         overlays.length
           ? `Loaded ${overlays.length} online data overlay${overlays.length === 1 ? "" : "s"}.${warnings.length ? ` ${warnings.join(" ")}` : ""}`
-          : `Online sources returned no matching overlays; using catalog data.${warnings.length ? ` ${warnings.join(" ")}` : ""}`,
+          : `Online sources returned no matching rows; using the built-in car list.${warnings.length ? ` ${warnings.join(" ")}` : ""}`,
       );
     } catch (error) {
       setAiStatus(error instanceof Error ? error.message : "Could not load online vehicle data.");
@@ -430,12 +430,12 @@ export function BuyerProfilePlanner() {
     setIsPersonalizing(true);
     setAiRecommendations([]);
     if (options.source === "confirmed-profile") {
-      setAiStatus("I have enough to make a responsible recommendation. I’m checking the catalog now.");
+      setAiStatus("I have enough to make a responsible recommendation. I’m checking the car list now.");
     } else if (options.source === "fine-tune") {
       setAiStatus("I’m checking the updated preferences once.");
     } else {
       setConfirmedProfileConversion(null);
-      setAiStatus("I’m checking your preferences against the catalog.");
+      setAiStatus("I’m checking your preferences against the car list.");
     }
 
     let freshOnlineOverlays = onlineOverlays;
@@ -467,7 +467,7 @@ export function BuyerProfilePlanner() {
       setProviderStatus(onlineData.providerStatus);
       onlineStatus = freshOnlineOverlays.length
         ? `${freshOnlineOverlays.length} online overlay${freshOnlineOverlays.length === 1 ? "" : "s"}${onlineData.warnings.length ? ` (${onlineData.warnings.join(" ")})` : ""}`
-        : `catalog fallback${onlineData.warnings.length ? ` (${onlineData.warnings.join(" ")})` : ""}`;
+        : `built-in car list fallback${onlineData.warnings.length ? ` (${onlineData.warnings.join(" ")})` : ""}`;
     } catch (error) {
       onlineStatus = "online data unavailable";
     } finally {
@@ -542,10 +542,10 @@ export function BuyerProfilePlanner() {
       setHasDetailedSearchRun(true);
       setAiStatus(
         options.source === "confirmed-profile"
-          ? `I used your confirmed preferences and checked the catalog. Data used: ${onlineStatus}.`
+          ? `I used your confirmed preferences and checked the car list. Data used: ${onlineStatus}.`
           : options.source === "fine-tune"
             ? `I updated the recommendation from your fine-tuned preferences. Data used: ${onlineStatus}.`
-          : `${writtenStatus ? `${writtenStatus} ` : ""}I checked your preferences against the catalog. Data used: ${onlineStatus}.`,
+          : `${writtenStatus ? `${writtenStatus} ` : ""}I checked your preferences against the car list. Data used: ${onlineStatus}.`,
       );
     } catch (error) {
       setAiStatus(error instanceof Error ? error.message : "Could not personalize recommendations");
@@ -566,7 +566,7 @@ export function BuyerProfilePlanner() {
             <div>
               <p className="text-xs font-black uppercase tracking-[0.18em] text-cyan-300">Personalized Car Advisor</p>
               <h1 className="mt-1 text-2xl font-black tracking-tight text-white md:text-4xl">
-                Find a first car with real data and clear tradeoffs.
+                What first car actually fits you?
               </h1>
             </div>
             <div className="flex flex-wrap gap-2">
@@ -644,32 +644,17 @@ export function BuyerProfilePlanner() {
             {isSearching && !hasDetailedSearchRun ? (
               <section className="rounded-lg border border-cyan-200/15 bg-cyan-200/[0.06] p-4 text-sm font-bold leading-6 text-cyan-50">
                 {confirmedProfileConversion
-                  ? "I have enough to make a responsible recommendation. I’m checking the catalog now."
-                  : "I’m checking your preferences against the catalog."}
+                  ? "I have enough to make a responsible recommendation. I’m checking the car list now."
+                  : "I’m checking your preferences against the car list."}
               </section>
             ) : null}
 
             {hasDetailedSearchRun ? (
               <>
-                <section className="grid gap-3 md:grid-cols-4">
-                  <AdvisorTile
-                    description={`Loan principal from ${formatMoney(resultBudget.paymentBudget)}/mo over ${resultProfile.loanTermMonths} months at ${resultProfile.apr}% APR, plus ${formatMoney(resultProfile.downPayment)} down, divided by estimated tax and fees.`}
-                    label="Buying power"
-                    value={formatMoney(resultBudget.maxPurchasePrice)}
-                  />
-                  <AdvisorTile
-                    description={`${formatMoney(resultProfile.monthlyBudget)} budget minus ${formatMoney(resultProfile.insuranceBudget)} insurance, ${formatMoney(resultBudget.fuelCost)} fuel, and ${formatMoney(resultBudget.maintenanceReserve)} maintenance reserve.`}
-                    label="Payment room"
-                    value={`${formatMoney(resultBudget.paymentBudget)}/mo`}
-                  />
-                  <AdvisorTile label="Top match" value={rankedVehicles[0] ? `${rankedVehicles[0].make} ${rankedVehicles[0].model}` : "No match"} />
-                  <AdvisorTile label="Compare list" value={`${comparedVehicles.length} cars`} />
-                </section>
-
                 <section className="grid gap-4" ref={resultsRef}>
                   <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
                     <div>
-                      <h2 className="text-2xl font-black text-white">Recommended cars</h2>
+                      <h2 className="text-2xl font-black text-white">What would you recommend?</h2>
                       <p className="text-sm font-semibold text-slate-400">{aiStatus}</p>
                     </div>
                     <p className="text-sm font-black text-cyan-300">
@@ -722,7 +707,7 @@ export function BuyerProfilePlanner() {
               </>
             ) : (
               <section className="rounded-lg border border-white/10 bg-white/[0.035] p-4 text-sm font-semibold leading-6 text-slate-400">
-                When you confirm your preferences, I’ll check the catalog and show the recommendation here.
+                When you confirm your preferences, I’ll check the car list and show the recommendation here.
               </section>
             )}
           </>
@@ -746,9 +731,9 @@ export function BuyerProfilePlanner() {
 
             <section className="grid gap-4 rounded-lg border border-white/10 bg-white/[0.055] p-4 shadow-[0_24px_80px_rgba(0,0,0,0.28)] backdrop-blur">
               <div>
-                <h2 className="text-xl font-black text-white">Scoring weights</h2>
+                <h2 className="text-xl font-black text-white">What influenced this decision?</h2>
                 <p className="text-sm font-semibold text-slate-400">
-                  Tune how the advisor ranks cars. Values are normalized automatically.
+                  Adjust how much each factor matters. I’ll keep the percentages balanced.
                 </p>
               </div>
               <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
@@ -852,7 +837,7 @@ function ConversationStarter({
       {showCompactOpening ? (
         <div className="flex flex-col gap-3 p-4 md:flex-row md:items-center md:justify-between md:p-5">
           <div>
-            <p className="text-xs font-black uppercase tracking-[0.16em] text-cyan-300">What you told me</p>
+            <p className="text-xs font-black uppercase tracking-[0.16em] text-cyan-300">What did you hear from me?</p>
             <p className="mt-1 max-w-4xl text-sm font-bold leading-6 text-slate-200">{value}</p>
           </div>
           <button
@@ -867,9 +852,9 @@ function ConversationStarter({
         <div className="grid gap-6 p-5 md:p-8 lg:grid-cols-[minmax(0,1.08fr)_minmax(280px,0.92fr)] lg:items-end">
           <div className="grid gap-5">
             <div>
-              <p className="text-xs font-black uppercase tracking-[0.18em] text-cyan-300">Start with your words</p>
+              <p className="text-xs font-black uppercase tracking-[0.18em] text-cyan-300">Where should I start?</p>
               <h2 className="mt-3 max-w-4xl text-3xl font-black leading-tight tracking-tight text-white md:text-5xl">
-                Tell me about the car you’re hoping to find.
+                What kind of car are you hoping to find?
               </h2>
               <p className="mt-4 max-w-2xl text-base font-semibold leading-7 text-slate-300 md:text-lg">
                 You can be specific, uncertain, practical, or emotional. Start with what matters to you.
@@ -907,7 +892,7 @@ function ConversationStarter({
           </div>
 
           <div className="rounded-lg border border-white/10 bg-slate-950/35 p-4">
-            <p className="text-xs font-black uppercase tracking-[0.14em] text-slate-400">Try one of these</p>
+            <p className="text-xs font-black uppercase tracking-[0.14em] text-slate-400">What could I say?</p>
             <div className="mt-3 flex flex-wrap gap-2">
               {prompts.map((prompt) => (
                 <button
@@ -946,11 +931,11 @@ function PreferencesUsedPanel({ conversion, onAdjust }: { conversion: ConfirmedP
   const visibleWarnings = [...conversion.mappingLimitations, ...conversion.conversionWarnings].slice(0, 4);
 
   return (
-    <details className="group rounded-lg border border-cyan-200/15 bg-cyan-200/[0.055] p-4 md:p-5" open>
+    <details className="group rounded-lg border border-cyan-200/15 bg-cyan-200/[0.055] p-4 md:p-5">
       <summary className="flex min-h-12 cursor-pointer list-none flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <div>
-          <p className="text-xs font-black uppercase tracking-[0.16em] text-cyan-200">Preferences used</p>
-          <h3 className="mt-1 text-xl font-black text-white">What I applied to this recommendation</h3>
+          <p className="text-xs font-black uppercase tracking-[0.16em] text-cyan-200">What did you use?</p>
+          <h3 className="mt-1 text-xl font-black text-white">What did you use for this recommendation?</h3>
         </div>
         <button
           className="min-h-10 rounded-lg border border-white/10 bg-slate-950/35 px-4 text-sm font-black text-slate-200 transition hover:border-cyan-300/50 hover:bg-cyan-300/10"
@@ -965,15 +950,15 @@ function PreferencesUsedPanel({ conversion, onAdjust }: { conversion: ConfirmedP
       </summary>
 
       <div className="mt-4 grid gap-3 border-t border-white/10 pt-4 lg:grid-cols-2">
-        <ConversionList emptyText="No approved hard requirements were added." items={conversion.appliedHardConstraints} title="Approved requirements" />
-        <ConversionList emptyText="No soft preferences were applied." items={strongestPreferences} title="Strongest preferences" />
-        <ConversionList emptyText="No important defaults were disclosed." items={conversion.preservedDefaults} title="Defaults and assumptions" />
-        <ConversionList emptyText="No unresolved fields remained." items={conversion.unresolvedFields} title="Still unresolved" />
+        <ConversionList emptyText="No approved hard requirements were added." items={conversion.appliedHardConstraints} title="What requirements did I confirm?" />
+        <ConversionList emptyText="No soft preferences were applied." items={strongestPreferences} title="What mattered most?" />
+        <ConversionList emptyText="No important defaults were disclosed." items={conversion.preservedDefaults} title="What did I assume?" />
+        <ConversionList emptyText="No unresolved fields remained." items={conversion.unresolvedFields} title="What still needs an answer?" />
       </div>
 
       {visibleWarnings.length ? (
         <div className="mt-4 rounded-lg border border-amber-300/20 bg-amber-300/[0.08] p-4">
-          <p className="text-sm font-black text-amber-50">Mapping notes</p>
+          <p className="text-sm font-black text-amber-50">What did you need to translate?</p>
           <ul className="mt-2 grid gap-1 text-sm font-semibold leading-6 text-amber-50/85">
             {visibleWarnings.map((warning) => (
               <li key={warning}>{warning}</li>
@@ -1037,8 +1022,8 @@ function FineTuneDetailsPanel({
     >
       <summary className="flex min-h-12 cursor-pointer list-none flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <div>
-          <p className="text-xs font-black uppercase tracking-[0.16em] text-slate-500">Optional precision controls</p>
-          <h2 className="mt-1 text-xl font-black text-white">Fine-tune the details</h2>
+          <p className="text-xs font-black uppercase tracking-[0.16em] text-slate-500">Want to adjust anything?</p>
+          <h2 className="mt-1 text-xl font-black text-white">Adjust the details</h2>
           <p className="mt-1 text-sm font-semibold leading-6 text-slate-400">
             Use these controls when you want precise limits or want to correct what the advisor understood.
           </p>
@@ -1052,7 +1037,7 @@ function FineTuneDetailsPanel({
         <section className="grid gap-3 rounded-lg border border-cyan-200/15 bg-cyan-200/[0.055] p-4">
           <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
             <div>
-              <p className="text-xs font-black uppercase tracking-[0.14em] text-cyan-200">Current preferences came from</p>
+              <p className="text-xs font-black uppercase tracking-[0.14em] text-cyan-200">Where did these preferences come from?</p>
               <p className="mt-1 text-lg font-black text-white">{profileSourceLabel}</p>
               <p className="mt-1 text-sm font-semibold leading-6 text-slate-300">
                 Last preference update in this session: {lastProfileUpdateSequence ? `#${lastProfileUpdateSequence}` : "not applied yet"}.
@@ -1086,7 +1071,7 @@ function FineTuneDetailsPanel({
           ) : null}
           {conflictNotes.length ? (
             <div className="rounded-lg border border-sky-300/20 bg-sky-300/[0.08] p-3">
-              <p className="text-sm font-black text-sky-50">Manual edit wins</p>
+              <p className="text-sm font-black text-sky-50">What did my edit override?</p>
               <ul className="mt-1 grid gap-1 text-sm font-semibold leading-6 text-sky-50/85">
                 {conflictNotes.map((note) => (
                   <li key={note}>{note}</li>
@@ -1097,7 +1082,7 @@ function FineTuneDetailsPanel({
         </section>
 
         <div className="grid gap-4 xl:grid-cols-2">
-          <QuestionGroup title="Budget and ownership">
+          <QuestionGroup title="What can I afford?">
             <NumberField label="Purchase budget" meta={metadata.maxPurchaseBudget} field="maxPurchaseBudget" step={500} profile={profile} setProfile={(next) => update("maxPurchaseBudget", next)} />
             <NumberField label="Monthly budget" meta={metadata.monthlyBudget} field="monthlyBudget" step={25} profile={profile} setProfile={(next) => update("monthlyBudget", next)} />
             <NumberField label="Down payment" meta={metadata.downPayment} field="downPayment" step={100} profile={profile} setProfile={(next) => update("downPayment", next)} />
@@ -1116,7 +1101,7 @@ function FineTuneDetailsPanel({
             <NumberField label="Annual mileage" meta={metadata.expectedAnnualMileage} field="expectedAnnualMileage" step={500} profile={profile} setProfile={(next) => update("expectedAnnualMileage", next)} />
           </QuestionGroup>
 
-          <QuestionGroup title="Daily life">
+          <QuestionGroup title="How will I use the car?">
             <NumberField label="Family size" meta={metadata.familySize} field="familySize" step={1} profile={profile} setProfile={(next) => update("familySize", next)} />
             <SelectField
               label="Cargo"
@@ -1144,7 +1129,7 @@ function FineTuneDetailsPanel({
             />
           </QuestionGroup>
 
-          <QuestionGroup title="Car preferences">
+          <QuestionGroup title="What kind of car do I want?">
             <MakePreferenceField
               makeValue={makeValue}
               metadata={metadata.requiredMake || metadata.preferredMake}
@@ -1218,7 +1203,7 @@ function FineTuneDetailsPanel({
             <RangeField label="Performance" meta={metadata.performanceImportance} field="performanceImportance" profile={profile} setProfile={(next) => update("performanceImportance", next)} />
           </QuestionGroup>
 
-          <QuestionGroup title="Risk and priorities">
+          <QuestionGroup title="What risks matter most?">
             <RangeField label="Reliability" meta={metadata.reliabilityImportance} field="reliabilityImportance" profile={profile} setProfile={(next) => update("reliabilityImportance", next)} />
             <NumberField label="Reliability minimum" meta={metadata.reliabilityMinimum} field="reliabilityMinimum" step={1} profile={profile} setProfile={(next) => update("reliabilityMinimum", next)} />
             <SelectField
@@ -1358,8 +1343,8 @@ function PreferenceInterpretationPanel({
   return (
     <section className="grid gap-5 rounded-lg border border-cyan-200/15 bg-slate-950/35 p-4 md:p-5">
       <div className="grid gap-2">
-        <p className="text-xs font-black uppercase tracking-[0.16em] text-cyan-300">Advisor interpretation</p>
-        <h3 className="text-2xl font-black tracking-tight text-white">Here&apos;s what I&apos;m hearing.</h3>
+        <p className="text-xs font-black uppercase tracking-[0.16em] text-cyan-300">What I heard</p>
+        <h3 className="text-2xl font-black tracking-tight text-white">Did I understand you correctly?</h3>
         <p className="max-w-3xl text-sm font-semibold leading-6 text-slate-300">{interpretation.interpretationSummary}</p>
         {advisorContinuityMessage ? (
           <p className="max-w-3xl rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-sm font-bold leading-6 text-slate-200">
@@ -1376,7 +1361,7 @@ function PreferenceInterpretationPanel({
             body: fact.value,
             evidence: fact.evidencePhrase,
           }))}
-          title="What I understood"
+          title="What did you understand?"
         />
         <InterpretationList
           emptyText="No strong inferred preferences yet."
@@ -1385,33 +1370,33 @@ function PreferenceInterpretationPanel({
             body: preference.value,
             evidence: preference.evidencePhrase,
           }))}
-          title="What I inferred"
+          title="What am I reading between the lines?"
         />
       </div>
 
       {firstConflict ? (
         <div className="rounded-lg border border-amber-300/20 bg-amber-300/[0.07] p-4">
-          <p className="text-xs font-black uppercase tracking-[0.14em] text-amber-200">Tension to check</p>
+          <p className="text-xs font-black uppercase tracking-[0.14em] text-amber-200">What might conflict?</p>
           <p className="mt-2 text-sm font-bold leading-6 text-amber-50">{firstConflict.description}</p>
         </div>
       ) : null}
 
       {firstUncertainty ? (
         <div className="rounded-lg border border-white/10 bg-white/[0.04] p-4">
-          <p className="text-xs font-black uppercase tracking-[0.14em] text-slate-400">Uncertainty</p>
+          <p className="text-xs font-black uppercase tracking-[0.14em] text-slate-400">What am I not sure about?</p>
           <p className="mt-2 text-sm font-bold leading-6 text-slate-200">{firstUncertainty.question}</p>
         </div>
       ) : null}
 
       <div className="rounded-lg border border-cyan-200/15 bg-cyan-200/[0.06] p-4">
         <p className="text-xs font-black uppercase tracking-[0.14em] text-cyan-200">
-          {currentQuestion ? "Current question" : "Ready for confirmation"}
+          {currentQuestion ? "What should I ask next?" : "Does this look right?"}
         </p>
         <p className="mt-2 text-base font-black leading-7 text-white">
           {currentQuestion ? currentQuestion.text : "I think I understand enough to summarize what you’re looking for."}
         </p>
         <p className="mt-2 text-xs font-bold uppercase tracking-[0.12em] text-cyan-100/70">
-          Intake confidence: {session.interpretationConfidence}
+          How sure are you so far? {session.interpretationConfidence}
         </p>
       </div>
 
@@ -1571,15 +1556,15 @@ function ConfirmationProfilePanel({
   return (
     <section className="grid gap-5 rounded-lg border border-white/10 bg-slate-950/50 p-4 md:p-5">
       <div className="grid gap-2">
-        <p className="text-xs font-black uppercase tracking-[0.16em] text-cyan-300">Confirmation</p>
-        <h3 className="text-2xl font-black tracking-tight text-white">Here&apos;s what I would use.</h3>
+        <p className="text-xs font-black uppercase tracking-[0.16em] text-cyan-300">Before I look for cars…</p>
+        <h3 className="text-2xl font-black tracking-tight text-white">Is this what you want me to use?</h3>
         <p className="max-w-3xl text-sm font-semibold leading-6 text-slate-300">
-          Review this before I check the catalog. You can correct anything I misunderstood.
+          Review this before I look for cars. You can correct anything I misunderstood.
         </p>
       </div>
 
       <div className="rounded-lg border border-cyan-200/15 bg-cyan-200/[0.06] p-4">
-        <p className="text-xs font-black uppercase tracking-[0.14em] text-cyan-200">Advisor summary</p>
+        <p className="text-xs font-black uppercase tracking-[0.14em] text-cyan-200">Does this summary sound right?</p>
         <p className="mt-2 text-sm font-bold leading-6 text-white">{draft.advisorSummary}</p>
       </div>
 
@@ -1683,14 +1668,14 @@ function ConfirmationProfilePanel({
 
       {approvedDraft?.userApproved ? (
         <div className="rounded-lg border border-emerald-300/25 bg-emerald-300/[0.08] p-4">
-          <p className="text-sm font-black text-emerald-50">Your preferences are confirmed. Next, I&apos;ll check the catalog against them.</p>
+          <p className="text-sm font-black text-emerald-50">Your preferences are confirmed. Next, I&apos;ll check the car list against them.</p>
         </div>
       ) : null}
 
       {hasBlockingIssue ? (
         <div className="rounded-lg border border-amber-300/25 bg-amber-300/[0.08] p-4">
           <p className="text-sm font-bold leading-6 text-amber-50">
-            I need a maximum budget so I do not recommend cars that are unrealistic for you.
+            I need a maximum budget so I don’t recommend cars that are unrealistic for you.
           </p>
         </div>
       ) : null}
@@ -1702,7 +1687,7 @@ function ConfirmationProfilePanel({
           onClick={() => onApprove(draft)}
           type="button"
         >
-          {isRecommendationRunning ? "Checking catalog" : "Confirm and find cars"}
+          {isRecommendationRunning ? "Checking cars" : "Confirm and find cars"}
         </button>
         <button
           className="min-h-11 rounded-lg border border-white/10 bg-white/[0.05] px-4 text-sm font-black text-slate-200 transition hover:border-cyan-300/50 hover:bg-cyan-300/10"
@@ -1784,10 +1769,10 @@ function getConfirmationItemsForGroup(draft: ConfirmedPreferenceProfile, group: 
 
 function confirmationGroupLabel(group: ConfirmedPreferenceItem["group"]) {
   const labels: Record<ConfirmedPreferenceItem["group"], string> = {
-    your_situation: "Your Situation",
-    what_matters_most: "What Matters Most",
-    preferences_and_requirements: "Preferences And Requirements",
-    uncertainty_and_tradeoffs: "Uncertainty And Tradeoffs",
+    your_situation: "What’s your situation?",
+    what_matters_most: "What matters most?",
+    preferences_and_requirements: "What preferences or requirements did I hear?",
+    uncertainty_and_tradeoffs: "What still feels uncertain?",
   };
   return labels[group];
 }
@@ -1818,7 +1803,7 @@ function ComparisonView({
     return (
       <section className="grid gap-4">
         <div>
-          <h2 className="text-2xl font-black text-white">Side-by-side comparison</h2>
+          <h2 className="text-2xl font-black text-white">How do these cars compare?</h2>
           <p className="text-sm font-semibold text-slate-400">No match. There are no cars to compare under the current requirements.</p>
         </div>
         <NoMatchPanel decisionReport={decisionReport} decisionSet={decisionSet} profile={profile} />
@@ -1829,7 +1814,7 @@ function ComparisonView({
   return (
     <section className="grid gap-4">
       <div>
-        <h2 className="text-2xl font-black text-white">Side-by-side comparison</h2>
+        <h2 className="text-2xl font-black text-white">How do these cars compare?</h2>
         <p className="text-sm font-semibold text-slate-400">
           Add cars from Advisor to compare, or review the top three matches by default.
         </p>
@@ -1896,15 +1881,15 @@ function NoMatchPanel({
   return (
     <div className="grid gap-4">
       <section className="rounded-lg border border-amber-300/25 bg-amber-300/10 p-5 shadow-[0_24px_70px_rgba(0,0,0,0.22)]">
-        <p className="text-xs font-black uppercase tracking-[0.16em] text-amber-100">Advisor result</p>
-        <h3 className="mt-2 text-2xl font-black tracking-tight text-amber-50">I do not have a responsible match yet.</h3>
+        <p className="text-xs font-black uppercase tracking-[0.16em] text-amber-100">Here’s what I found</p>
+        <h3 className="mt-2 text-2xl font-black tracking-tight text-amber-50">I don’t have a responsible match yet.</h3>
         <p className="mt-3 max-w-3xl text-sm font-semibold leading-6 text-amber-50/85">
-          I would rather show no recommendation than force a car that violates your selected requirements.
+          I’d rather show no recommendation than force a car that violates your selected requirements.
           Relax one strict filter, then update the recommendation so the shortlist stays honest.
         </p>
         {reasons.length ? (
           <div className="mt-5">
-            <h4 className="text-xs font-black uppercase tracking-[0.12em] text-amber-100/80">Most likely blockers</h4>
+            <h4 className="text-xs font-black uppercase tracking-[0.12em] text-amber-100/80">What blocked the match?</h4>
             <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-3">
               {reasons.map((reason) => (
                 <div className="rounded-lg border border-amber-200/15 bg-slate-950/30 px-3 py-2 text-sm font-bold text-amber-50" key={reason}>
@@ -2185,16 +2170,6 @@ function FieldMetaLine({ impact, meta }: { impact?: string; meta?: FineTuneField
       {meta && impact ? " · " : null}
       {impact}
     </span>
-  );
-}
-
-function AdvisorTile({ description, label, value }: { description?: string; label: string; value: string }) {
-  return (
-    <div className="min-h-24 rounded-lg border border-white/10 bg-white/[0.055] p-4 shadow-[0_18px_50px_rgba(0,0,0,0.18)] backdrop-blur">
-      <strong className="block truncate text-xl font-black text-white">{value}</strong>
-      <span className="mt-2 block text-xs font-black uppercase tracking-[0.12em] text-slate-400">{label}</span>
-      {description ? <span className="mt-2 block text-xs font-semibold leading-5 text-slate-500">{description}</span> : null}
-    </div>
   );
 }
 

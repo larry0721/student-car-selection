@@ -23,7 +23,7 @@ export function DataImportPanel({
   providerStatus,
   warnings,
 }: DataImportPanelProps) {
-  const [status, setStatus] = useState("Optional: enrich recommendations with online data or your own CSV.");
+  const [status, setStatus] = useState("Optional: add online data or your own CSV.");
 
   async function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
@@ -43,7 +43,7 @@ export function DataImportPanel({
     <section className="grid gap-4 rounded-lg border border-white/10 bg-white/[0.055] p-4 shadow-[0_24px_70px_rgba(0,0,0,0.24)] backdrop-blur">
       <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
         <div>
-          <h2 className="text-lg font-black text-white">Data sources</h2>
+          <h2 className="text-lg font-black text-white">Where this information came from</h2>
           <p className="text-sm font-semibold text-slate-400">{status}</p>
         </div>
         <button
@@ -58,7 +58,7 @@ export function DataImportPanel({
 
       <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto_auto] md:items-end">
         <label className="grid gap-1.5 text-xs font-black uppercase tracking-[0.1em] text-slate-400">
-          <span>CSV score import</span>
+          <span>Want to add your own scores?</span>
           <input
             accept=".csv,text/csv"
             className="rounded-lg border border-white/10 bg-slate-950/40 px-3 py-2 text-sm font-extrabold text-slate-100 file:mr-3 file:rounded-lg file:border-0 file:bg-cyan-300 file:px-3 file:py-2 file:font-black file:text-slate-950"
@@ -66,8 +66,8 @@ export function DataImportPanel({
             type="file"
           />
         </label>
-        <DataBadge label="CSV overlays" value={importedCount} />
-        <DataBadge label="Online overlays" value={onlineCount} />
+        <DataBadge label="Rows you added" value={importedCount} />
+        <DataBadge label="Online rows added" value={onlineCount} />
       </div>
 
       {providerStatus.length ? (
@@ -86,7 +86,7 @@ export function DataImportPanel({
 
       <p className="text-xs font-semibold leading-5 text-slate-500">
         CSV columns supported: make, model, year, reliability, safety, insurance, maintenance, mpg,
-        commonIssues, imageUrl, listingUrl. Import is optional; unanswered data falls back to the app catalog.
+        commonIssues, imageUrl, listingUrl. Import is optional; unanswered data falls back to the built-in car list.
       </p>
     </section>
   );

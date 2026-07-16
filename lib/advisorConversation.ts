@@ -195,10 +195,10 @@ export function createAdvisorResponsePlan(intent: AdvisorIntent, context: Adviso
     case "record_preference_discovery":
       return {
         intent,
-        directAnswer: "I will treat that as a session-only preference signal, not a changed recommendation.",
-        evidence: ["The official ranking remains the deterministic DecisionReport best overall result."],
-        tradeoff: "Changing the official recommendation requires recalculating priorities and constraints.",
-        nextAction: "Use Search matches after changing priorities if you want the official ranking to update.",
+        directAnswer: "I’ll treat that as a note for this conversation, not as a changed recommendation yet.",
+        evidence: ["The saved recommendation still reflects the current confirmed profile."],
+        tradeoff: "If that preference should drive the decision, I’d want to recalculate the priorities and requirements.",
+        nextAction: "Update the recommendation after changing priorities if you want the saved result to change.",
         recalculationRequired: true,
         preferenceLed: true,
       };
@@ -231,7 +231,7 @@ export function renderAdvisorResponse(plan: AdvisorResponsePlan): AdvisorRendere
     plan.tradeoff || "",
     plan.preferenceConflict || "",
     plan.confidenceNote ? plan.confidenceNote : "",
-    plan.recalculationRequired ? "I would need you to recalculate before treating that as the official recommendation." : "",
+    plan.recalculationRequired ? "I’d want to recalculate before treating that as my recommendation." : "",
     plan.nextAction ? plan.nextAction : "",
   ].filter(Boolean);
 
@@ -266,7 +266,7 @@ export function getAdvisorActionLabel(intent: AdvisorIntent) {
     relax_make_requirement: "Relax the make requirement",
     increase_budget: "Increase the budget",
     make_requirement_flexible: "Make one requirement flexible",
-    record_preference_discovery: "Yes, I would accept that tradeoff",
+    record_preference_discovery: "Yes, I’d accept that tradeoff",
   };
   return labels[intent];
 }
@@ -288,7 +288,7 @@ function createRecommendationPlan(context: AdvisorContext): AdvisorResponsePlan 
     tradeoff: narrative.mainConcern,
     confidenceNote: narrative.uncertaintyDisclosure,
     nextAction: decisionReport.whatCouldChangeRecommendation[0]
-      ? `What could change my mind first: ${decisionReport.whatCouldChangeRecommendation[0]}`
+      ? `The first thing that could change my advice is this: ${decisionReport.whatCouldChangeRecommendation[0]}`
       : "You can compare alternatives by asking for value, safety, reliability, or performance perspectives.",
     recalculationRequired: false,
     preferenceLed: false,
@@ -302,14 +302,14 @@ function createRunnerUpPlan(context: AdvisorContext): AdvisorResponsePlan {
   return {
     intent: "compare_runner_up",
     directAnswer: runnerUp?.vehicleId
-      ? `The runner-up did not beat the ${formatRecommendationName(top)} because it lost on the structured comparison.`
-      : "There is no qualified runner-up in the current DecisionReport.",
+      ? `The runner-up did not beat the ${formatRecommendationName(top)} once I weighed the tradeoffs side by side.`
+      : "I don’t have a qualified runner-up in the current shortlist.",
     evidence: [context.decisionReport.whyRunnerUpLost || "No runner-up loss reason is available."],
     tradeoff: runnerUp?.overallMatchScore !== undefined
-      ? `Runner-up score: ${runnerUp.overallMatchScore}/100 versus ${top.overallMatchScore}/100 for the main recommendation.`
+      ? `The runner-up landed at ${runnerUp.overallMatchScore}/100 versus ${top.overallMatchScore}/100 for my recommendation.`
       : undefined,
     confidenceNote: formatConfidence(top),
-    nextAction: "Use the comparison view if you want to inspect category-by-category differences.",
+    nextAction: "Use the comparison view if you want to inspect the category-by-category differences.",
     recalculationRequired: false,
     preferenceLed: false,
   };
@@ -321,12 +321,12 @@ function createRiskPlan(context: AdvisorContext): AdvisorResponsePlan {
   return {
     intent: "explain_risk",
     directAnswer: tradeoff
-      ? `The biggest recorded risk is ${formatFieldLabel(tradeoff.field).toLowerCase()}.`
-      : `The ${formatRecommendationName(top)} has no major recorded tradeoff, but it still needs real-world verification.`,
+      ? `My biggest concern is ${formatFieldLabel(tradeoff.field).toLowerCase()}.`
+      : `I don’t see a major tradeoff for the ${formatRecommendationName(top)}, but I’d still verify the real car carefully.`,
     evidence: tradeoff
       ? [`${formatFieldLabel(tradeoff.field)} is ${String(tradeoff.vehicleValue)} with ${tradeoff.severity} severity and ${tradeoff.penaltyPoints} penalty points.`]
-      : ["No penalty-bearing tradeoff was recorded for the top recommendation."],
-    tradeoff: tradeoff ? formatTradeoff(tradeoff) : "Live listing condition, service history, and inspection results are still outside the deterministic catalog.",
+      : ["I don’t see a penalty-bearing tradeoff for this recommendation."],
+    tradeoff: tradeoff ? formatTradeoff(tradeoff) : "Live listing condition, service history, and inspection results still need real-world verification.",
     confidenceNote: formatConfidence(top),
     nextAction: "Before buying, verify condition, title status, maintenance history, and a pre-purchase inspection.",
     recalculationRequired: false,
@@ -340,14 +340,14 @@ function createUncertaintyPlan(context: AdvisorContext): AdvisorResponsePlan {
   const estimated = top.estimatedFields.slice(0, 3);
   return {
     intent: "explain_uncertainty",
-    directAnswer: `Data quality confidence is ${top.dataQualityConfidence.score}/100 ${top.dataQualityConfidence.level}.`,
+    directAnswer: `Data quality confidence is ${top.dataQualityConfidence.score}/100 ${top.dataQualityConfidence.level}. I’d treat that honestly before you rely on this shortlist.`,
     evidence: [
       ...missing.map((item) => `${formatFieldLabel(item.field)} is missing from ${item.expectedSource} (${item.impact} impact).`),
       ...estimated.map((item) => `${formatFieldLabel(item.field)} is ${formatEstimatedValue(item.value, item.unit)} by ${item.method}.`),
     ].slice(0, 4),
-    tradeoff: "Estimated ownership costs are useful for comparison, but verified listing condition can change the real purchase decision.",
+    tradeoff: "Estimated ownership costs are useful for comparison, but the verified listing condition can still change the buying decision.",
     confidenceNote: formatConfidence(top),
-    nextAction: "The most useful next step is adding live listing, NHTSA, FuelEconomy.gov, or CSV overlay data.",
+    nextAction: "The most useful next step is adding live listing, NHTSA, FuelEconomy.gov, or CSV score data.",
     recalculationRequired: false,
     preferenceLed: false,
   };
@@ -357,11 +357,11 @@ function createChangeConditionsPlan(context: AdvisorContext): AdvisorResponsePla
   const top = requireTopRecommendation(context);
   return {
     intent: "explain_change_conditions",
-    directAnswer: `The ${formatRecommendationName(top)} stays best overall unless one of the structured change factors shifts.`,
+    directAnswer: `I’d keep the ${formatRecommendationName(top)} as my recommendation unless one of these factors changes.`,
     evidence: context.decisionReport.whatCouldChangeRecommendation.slice(0, 4),
     tradeoff: formatTradeoff(getPrimaryTradeoff(top)),
     confidenceNote: formatConfidence(top),
-    nextAction: "Change the relevant preference or requirement, then run Search matches to recalculate the official recommendation.",
+    nextAction: "Change the relevant preference or requirement, then update the recommendation.",
     recalculationRequired: true,
     preferenceLed: false,
   };
@@ -376,22 +376,22 @@ function createAlternativePlan(context: AdvisorContext, category: "cheaper" | "s
   return {
     intent: getAlternativeIntent(category),
     directAnswer: alternative
-      ? `As an alternative perspective, the ${formatRecommendationName(alternative)} is the strongest ${label} qualified option I can show.`
-      : `I do not have a stronger qualified ${label} alternative than the current recommendation.`,
+      ? `As an alternative perspective, if we look through a ${label} lens, I’d point you to the ${formatRecommendationName(alternative)}.`
+      : `I don’t see a stronger qualified ${label} alternative than my current recommendation.`,
     evidence: alternative
-      ? [categoryEvidence, `The official best overall remains ${formatRecommendationName(top)} at ${top.overallMatchScore}/100.`]
-      : [`The current recommendation remains the highest qualified result in the available recommendation set.`],
+      ? [categoryEvidence, `I’d still keep ${formatRecommendationName(top)} as the best overall choice at ${top.overallMatchScore}/100.`]
+      : [`My current recommendation is still the strongest qualified result in the available shortlist.`],
     tradeoff: alternative ? compareAlternativeTradeoff(alternative, top) : formatTradeoff(getPrimaryTradeoff(top)),
     confidenceNote: alternative ? formatConfidence(alternative) : formatConfidence(top),
     preferenceConflict: category === "sportier"
-      ? "You may value driving enjoyment more than your original answers suggested."
+      ? "You may value driving enjoyment more than your earlier answers suggested."
       : category === "cheaper"
-        ? "You may value monthly cost more than the current score weights suggest."
+        ? "You may value monthly cost more than the current priorities suggest."
         : undefined,
     nextAction:
       category === "sportier"
         ? "Would you accept higher insurance or maintenance costs for better driving performance?"
-        : "Change the relevant priority and run Search matches if you want this alternative perspective to become the official ranking.",
+        : "Change the relevant priority and update the recommendation if you want this perspective to drive the result.",
     recalculationRequired: true,
     alternativeVehicleId: alternative?.vehicleId,
     preferenceLed: true,
@@ -403,12 +403,12 @@ function createChallengePlan(context: AdvisorContext): AdvisorResponsePlan {
   const primaryTradeoff = getPrimaryTradeoff(top);
   return {
     intent: "challenge_recommendation",
-    directAnswer: "I understand that you may still prefer another vehicle. I can explore that preference, but I would keep the current recommendation as the official best overall for now.",
-    evidence: [`The DecisionReport best overall is still ${formatRecommendationName(top)} at ${top.overallMatchScore}/100.`],
+    directAnswer: "I understand why you might prefer another vehicle. I can explore that preference, but I’d keep my current recommendation for now.",
+    evidence: [`The strongest overall choice is still ${formatRecommendationName(top)} at ${top.overallMatchScore}/100.`],
     tradeoff: primaryTradeoff
       ? `The current top choice already carries this tradeoff: ${formatTradeoff(primaryTradeoff)}`
       : "A preference-led option may still lose on affordability, reliability, safety, or ownership risk.",
-    preferenceConflict: "A weaker option can be worth exploring for personal reasons, but it should be labeled preference-led rather than best overall.",
+    preferenceConflict: "A weaker option can still be worth exploring for personal reasons, but I’d label it preference-led rather than best overall.",
     nextAction: "What attracts you most: brand, design, driving feel, size, or price?",
     recalculationRequired: false,
     preferenceLed: true,
@@ -434,7 +434,7 @@ function createNoMatchPlan(intent: AdvisorIntent, context: AdvisorContext): Advi
     intent,
     directAnswer,
     evidence: blockerEvidence,
-    tradeoff: "I would rather show no match than recommend a vehicle that violates a true hard constraint.",
+    tradeoff: "I’d rather show no match than recommend a vehicle that violates a true hard constraint.",
     nextAction: getNoMatchNextAction(intent, blockers),
     recalculationRequired: true,
     preferenceLed: false,
@@ -455,11 +455,11 @@ export function buildHumanAdvisorNarrative(context: AdvisorContext): HumanAdviso
   const curiosityPrompt = chooseCuriosityPrompt(context, top);
 
   return {
-    openingRecommendation: `Based on what you told me, I’d choose the ${formatRecommendationName(top)}.`,
+    openingRecommendation: `I’d recommend the ${formatRecommendationName(top)}.`,
     buyerContextAcknowledgment: getBuyerContextAcknowledgment(context.profile),
     strongestReasons: strongestReasons.length
       ? strongestReasons
-      : [`It came out ahead after applying your hard requirements and current priorities.`],
+      : [`It came out ahead after I applied your hard requirements and current priorities.`],
     nearWinner,
     whyNearWinnerLost: runnerUp ? context.decisionReport.whyRunnerUpLost : undefined,
     mainConcern,
@@ -484,14 +484,14 @@ function buildNoMatchNarrative(context: AdvisorContext): HumanAdvisorNarrative {
 
   return {
     openingRecommendation: "I don’t have a responsible recommendation under these requirements.",
-    buyerContextAcknowledgment: "Your selected requirements are being treated as hard limits.",
+    buyerContextAcknowledgment: "I’m treating your selected requirements as hard limits.",
     strongestReasons: [
       blockerText,
-      "I would rather tell you that clearly than invent an option that is not in the available data.",
+      "I’d rather tell you that clearly than invent an option that is not in the available data.",
     ],
-    mainConcern: "The current filters remove every qualified vehicle before ranking begins.",
-    uncertaintyDisclosure: "This is a constraint issue, not a data-generation issue; no vehicle is being fabricated to fill the gap.",
-    advisorOpinion: "I would loosen one requirement and recalculate before comparing cars.",
+    mainConcern: "The current requirements remove every qualified vehicle before I can make a responsible comparison.",
+    uncertaintyDisclosure: "This is a constraint issue, not a missing-imagination issue; I’m not going to invent a vehicle to fill the gap.",
+    advisorOpinion: "I’d loosen one requirement and recalculate before comparing cars.",
     curiosityPrompt: chooseNoMatchQuestion(blockers),
     suggestedActions: getNoMatchActions(context.decisionSet).map((action) => action.label),
     whatIConsidered: blockers.length
@@ -502,7 +502,7 @@ function buildNoMatchNarrative(context: AdvisorContext): HumanAdvisorNarrative {
               : blocker.label;
           return `${blockerLabel} removed ${blocker.excludedCount} candidate${blocker.excludedCount === 1 ? "" : "s"}.`;
         })
-      : ["The engine evaluated the catalog and found zero qualified vehicles."],
+      : ["I checked the catalog and found zero qualified vehicles."],
   };
 }
 
@@ -628,7 +628,7 @@ function buildNearWinner(
   return {
     vehicleName: formatRecommendationName(runnerUp),
     strongestAdvantage: advantage.text,
-    whatCouldMakeItWin: `If ${advantage.preferenceShift} becomes more important, I would recalculate the comparison rather than assume it wins.`,
+    whatCouldMakeItWin: `If ${advantage.preferenceShift} becomes more important, I’d recalculate the comparison rather than assume it wins.`,
   };
 }
 
@@ -746,13 +746,13 @@ function getScoreMeaning(score: number) {
 function getHumanConcern(recommendation: RecommendationObject, tradeoff?: RecommendationTradeoff) {
   const hasHighMissingInfo = recommendation.missingInformation.some((item) => item.impact === "high");
   if (tradeoff?.severity === "high") {
-    return `I would be cautious about ${formatFieldLabel(tradeoff.field).toLowerCase()} before treating this as a purchase target.`;
+    return `I’d be cautious about ${formatFieldLabel(tradeoff.field).toLowerCase()} before treating this as a purchase target.`;
   }
   if (tradeoff) {
     return `The main tradeoff is ${formatFieldLabel(tradeoff.field).toLowerCase()}, but it is not strong enough to overturn the recommendation by itself.`;
   }
   if (hasHighMissingInfo || recommendation.dataQualityConfidence.level !== "high") {
-    return "I do not see a major red flag in the comparison, but I would verify the actual listing condition.";
+    return "I don’t see a major red flag in the comparison, but I’d verify the actual listing condition.";
   }
   return "The tradeoffs are relatively small under your current priorities.";
 }
@@ -765,19 +765,19 @@ function getHumanUncertainty(recommendation: RecommendationObject) {
     const missing = recommendation.missingInformation[0];
     return missing
       ? `Data confidence is medium because ${formatFieldLabel(missing.field).toLowerCase()} still needs ${missing.expectedSource} support.`
-      : "Data confidence is medium, so I would still verify the live listing before buying.";
+      : "Data confidence is medium, so I’d still verify the live listing before buying.";
   }
   return "The data confidence is high enough for a shortlist decision, though a real inspection still matters.";
 }
 
 function getAdvisorOpinion(recommendation: RecommendationObject, tradeoff?: RecommendationTradeoff) {
   if (recommendation.recommendationConfidence.level === "low") {
-    return "I would treat this as the best available lead, not a car to buy without more verification.";
+    return "I’d treat this as the best available lead, not a car to buy without more verification.";
   }
   if (tradeoff?.severity === "high") {
-    return "I would keep it on the list, but only after checking that concern carefully.";
+    return "I’d keep it on the list, but only after checking that concern carefully.";
   }
-  return "I would be comfortable shortlisting it before checking condition, title, and local price.";
+  return "I’d be comfortable shortlisting it before checking condition, title, and local price.";
 }
 
 function chooseCuriosityPrompt(context: AdvisorContext, top: RecommendationObject) {
@@ -838,13 +838,13 @@ function formatSignalEvidence(signal: RecommendationSignal) {
 }
 
 function formatTradeoff(tradeoff?: RecommendationTradeoff) {
-  if (!tradeoff) return "I do not see a major red flag in the current comparison.";
+  if (!tradeoff) return "I don’t see a major red flag in the current comparison.";
   const preference = tradeoff.userPreference !== undefined ? ` versus target ${String(tradeoff.userPreference)}` : "";
   return `${formatFieldLabel(tradeoff.field)} is ${formatTradeoffValue(tradeoff.field, tradeoff.vehicleValue)}${preference}, with ${tradeoff.severity} severity.`;
 }
 
 function formatConfidence(recommendation: RecommendationObject) {
-  return `Recommendation confidence is ${recommendation.recommendationConfidence.score}/100 ${recommendation.recommendationConfidence.level}; data quality confidence is ${recommendation.dataQualityConfidence.score}/100 ${recommendation.dataQualityConfidence.level}.`;
+  return `I’d rate recommendation confidence at ${recommendation.recommendationConfidence.score}/100 ${recommendation.recommendationConfidence.level}; data quality is ${recommendation.dataQualityConfidence.score}/100 ${recommendation.dataQualityConfidence.level}.`;
 }
 
 function formatRecommendationName(recommendation: RecommendationObject) {
