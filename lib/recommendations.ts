@@ -1,6 +1,23 @@
 import { calculateBudget } from "./affordability";
 import { getVehicleDataQualityMisses, isRecommendableVehicle } from "./data/vehicleValidation";
-import type { BudgetSummary, BuyerProfile, ConstraintKey, ImportanceLevel, ScoreWeights } from "@/types/buyer";
+import { getProfileDimensionState, hasCanonicalDimensionState, type ProfileDimension } from "./profileDimensions";
+import {
+  decisionDimensionForConstraint,
+  isDecisionDimensionDisabled,
+  policyDimensionForScoreCategory,
+  shouldEnforceDecisionDimension,
+} from "./decisionParticipationPolicy";
+import {
+  resolveEffectiveScoringPolicy,
+  scoringCategories,
+} from "./effectiveScoringPolicy";
+import type { BudgetSummary, BuyerProfile, ConstraintKey, ScoreWeights } from "@/types/buyer";
+import type {
+  ContributionDataStatus,
+  EffectiveScoringPolicy,
+  ScoreContributionRecord,
+  ScoringCategory,
+} from "@/types/scoring";
 import type {
   BetterAlternative,
   CandidatePipelineDebug,
@@ -24,7 +41,7 @@ import type {
   Vehicle,
 } from "@/types/vehicle";
 
-type CategoryKey = keyof ScoreWeights;
+type CategoryKey = ScoringCategory;
 
 type ScorePenalty = {
   label: string;
@@ -96,17 +113,7 @@ type CandidatePipelineResult = {
   pipelineDebug: CandidatePipelineDebug;
 };
 
-const categoryKeys: CategoryKey[] = [
-  "affordability",
-  "reliability",
-  "safety",
-  "fuelEnergyCost",
-  "insuranceCost",
-  "maintenanceRisk",
-  "practicality",
-  "resaleValue",
-  "drivingPreferenceFit",
-];
+const categoryKeys: CategoryKey[] = scoringCategories;
 
 const spaciousTypes = new Set(["hatchback", "wagon", "suv", "minivan", "truck"]);
 const snowDrivetrains = new Set(["AWD", "4WD"]);
@@ -285,12 +292,14 @@ function getWhyRunnerUpLost(bestOverall: RecommendationObject | undefined, runne
   const strongestGap = categoryKeys
     .map((category) => ({
       category,
-      gap: getSignalScore(bestOverall, category) - getSignalScore(runnerUp, category),
+      gap:
+        getRecommendationContribution(bestOverall, category)
+        - getRecommendationContribution(runnerUp, category),
     }))
     .sort((a, b) => b.gap - a.gap)[0];
   const scoreGap = bestOverall.overallMatchScore - runnerUp.overallMatchScore;
   if (strongestGap && strongestGap.gap > 0) {
-    return `${runnerUp.vehicle.year} ${runnerUp.vehicle.make} ${runnerUp.vehicle.model} lost to ${bestOverall.vehicle.year} ${bestOverall.vehicle.make} ${bestOverall.vehicle.model} by ${scoreGap} total points and trailed on ${scoreWeightLabels[strongestGap.category]} by ${Math.round(strongestGap.gap)} points.`;
+    return `${runnerUp.vehicle.year} ${runnerUp.vehicle.make} ${runnerUp.vehicle.model} lost to ${bestOverall.vehicle.year} ${bestOverall.vehicle.make} ${bestOverall.vehicle.model} by ${scoreGap} total points and received ${roundContribution(strongestGap.gap)} fewer weighted points from ${scoreWeightLabels[strongestGap.category]}.`;
   }
   return `${runnerUp.vehicle.year} ${runnerUp.vehicle.make} ${runnerUp.vehicle.model} had a lower total match score by ${scoreGap} points.`;
 }
@@ -321,10 +330,20 @@ function getRunnerUpAdvantage(bestOverall: RecommendationObject, runnerUp: Recom
   const advantage = categoryKeys
     .map((category) => ({
       category,
-      gap: getSignalScore(runnerUp, category) - getSignalScore(bestOverall, category),
+      gap:
+        getRecommendationContribution(runnerUp, category)
+        - getRecommendationContribution(bestOverall, category),
     }))
     .sort((a, b) => b.gap - a.gap)[0];
   return advantage && advantage.gap > 0 ? scoreWeightLabels[advantage.category] : "the runner-up's strongest category";
+}
+
+function getRecommendationContribution(
+  recommendation: RecommendationObject,
+  category: keyof ScoreWeights,
+) {
+  return recommendation.scoreContributions.find((item) => item.category === category)
+    ?.weightedContribution || 0;
 }
 
 function getSignalScore(recommendation: RecommendationObject, category: keyof ScoreWeights) {
@@ -409,8 +428,26 @@ export function runCandidatePipeline(
   const qualifiedDrafts = candidateDrafts.filter((draft) => draft.hardConstraintStatus.status === "qualified");
   const compromiseDrafts = candidateDrafts.filter((draft) => draft.hardConstraintStatus.status === "compromise");
   const excludedDrafts = candidateDrafts.filter((draft) => draft.hardConstraintStatus.status === "excluded");
-  const filteredSuitabilityDrafts = evaluateSuitability(filteredDrafts, profile, budget, maxPrice);
-  const excludedDiagnosticDrafts = evaluateSuitability(excludedDrafts, profile, budget, maxPrice);
+  const effectiveScoringPolicy = resolveEffectiveScoringPolicy({
+    profile,
+    baseWeights: profile.scoreWeights,
+    availableVehicleDataCapabilities: getCatalogScoringCapabilities(candidateVehicles),
+    applyLegacyPriorityScaling: !options.disablePriorityScaling,
+  });
+  const filteredSuitabilityDrafts = evaluateSuitability(
+    filteredDrafts,
+    profile,
+    budget,
+    maxPrice,
+    effectiveScoringPolicy,
+  );
+  const excludedDiagnosticDrafts = evaluateSuitability(
+    excludedDrafts,
+    profile,
+    budget,
+    maxPrice,
+    effectiveScoringPolicy,
+  );
   const suitabilityDrafts = [...filteredSuitabilityDrafts, ...excludedDiagnosticDrafts];
   const qualifiedSuitabilityDrafts = filteredSuitabilityDrafts.filter((draft) => draft.hardConstraintStatus.status === "qualified");
 
@@ -421,21 +458,29 @@ export function runCandidatePipeline(
         ? filteredSuitabilityDrafts
         : suitabilityDrafts,
   );
-  const normalizedWeights = options.disablePriorityScaling ? normalizeScoreWeights(profile.scoreWeights) : getDynamicScoreWeights(profile);
   const allScoredVehicles = suitabilityDrafts
-    .map((draft) => finalizeScoreDraft(draft, profile, normalizedWeights, categoryStats))
-    .sort((a, b) => b.score - a.score || b.confidence.score - a.confidence.score || a.price - b.price);
+    .map((draft) => finalizeScoreDraft(draft, profile, effectiveScoringPolicy, categoryStats))
+    .sort((a, b) =>
+      b.score - a.score
+      || b.confidence.score - a.confidence.score
+      || (effectiveScoringPolicy.legacyProfile ? a.price - b.price : a.id.localeCompare(b.id)),
+    );
   const hydratedVehicles = hydrateScoredVehicles(allScoredVehicles, profile);
-  const rankedVehicles = hydratedVehicles.filter(
-    (vehicle) =>
-      vehicle.hardConstraintStatus.status === "qualified" ||
-      (options.includeCompromises && vehicle.hardConstraintStatus.status === "compromise") ||
-      (options.includeExcluded && vehicle.hardConstraintStatus.status === "excluded"),
-  );
+  const rankingEnabled = effectiveScoringPolicy.mode !== "needs_clarification";
+  const rankedVehicles = rankingEnabled
+    ? hydratedVehicles.filter(
+        (vehicle) =>
+          vehicle.hardConstraintStatus.status === "qualified" ||
+          (options.includeCompromises && vehicle.hardConstraintStatus.status === "compromise") ||
+          (options.includeExcluded && vehicle.hardConstraintStatus.status === "excluded"),
+      )
+    : [];
   const primaryRecommendations = hydratedVehicles
+    .filter(() => rankingEnabled)
     .filter((vehicle) => vehicle.hardConstraintStatus.status === "qualified")
     .map((vehicle) => vehicle.recommendation);
   const compromiseRecommendations = hydratedVehicles
+    .filter(() => rankingEnabled)
     .filter((vehicle) => vehicle.hardConstraintStatus.status === "compromise")
     .map((vehicle) => vehicle.recommendation);
   const excludedRecommendations = hydratedVehicles
@@ -449,6 +494,7 @@ export function runCandidatePipeline(
     qualifiedCount: qualifiedDrafts.length,
     compromiseCount: compromiseDrafts.length,
     rankedVehicles: hydratedVehicles,
+    rankingEnabled,
   });
 
   return {
@@ -486,8 +532,11 @@ function evaluateSuitability(
   profile: BuyerProfile,
   budget: BudgetSummary,
   maxPrice: number,
+  effectiveScoringPolicy: EffectiveScoringPolicy,
 ): ScoreDraft[] {
-  return candidateDrafts.map((draft) => addSuitabilityScores(draft, profile, budget, maxPrice));
+  return candidateDrafts.map((draft) =>
+    addSuitabilityScores(draft, profile, budget, maxPrice, effectiveScoringPolicy),
+  );
 }
 
 function hydrateScoredVehicles(scoredVehicles: ScoredVehicle[], profile: BuyerProfile): ScoredVehicle[] {
@@ -512,9 +561,14 @@ function buildPipelineDebug(input: {
   qualifiedCount: number;
   compromiseCount: number;
   rankedVehicles: ScoredVehicle[];
+  rankingEnabled: boolean;
 }): CandidatePipelineDebug {
-  const qualifiedVehicles = input.rankedVehicles.filter((vehicle) => vehicle.hardConstraintStatus.status === "qualified");
-  const compromiseVehicles = input.rankedVehicles.filter((vehicle) => vehicle.hardConstraintStatus.status === "compromise");
+  const qualifiedVehicles = input.rankingEnabled
+    ? input.rankedVehicles.filter((vehicle) => vehicle.hardConstraintStatus.status === "qualified")
+    : [];
+  const compromiseVehicles = input.rankingEnabled
+    ? input.rankedVehicles.filter((vehicle) => vehicle.hardConstraintStatus.status === "compromise")
+    : [];
   const displayRanking = qualifiedVehicles.length ? qualifiedVehicles : compromiseVehicles;
 
   return {
@@ -590,17 +644,19 @@ function getRunnerUpLossReasons(topVehicles: ScoredVehicle[]): CandidatePipeline
     const strongestGap = categoryKeys
       .map((category) => ({
         category,
-        gap: Math.round((winner.scoreBreakdown[category] || 0) - (runnerUp.scoreBreakdown[category] || 0)),
+        gap:
+          getCategoryContribution(winner, category)
+          - getCategoryContribution(runnerUp, category),
       }))
       .sort((a, b) => b.gap - a.gap)[0];
     const penaltyGap =
       runnerUp.penalties.reduce((sum, penalty) => sum + penalty.points, 0) -
       winner.penalties.reduce((sum, penalty) => sum + penalty.points, 0);
     const scoreGap = Math.max(0, winner.score - runnerUp.score);
-    const categoryGap = strongestGap?.gap || 0;
+    const categoryGap = roundContribution(strongestGap?.gap || 0);
     const primaryReason =
       categoryGap > 0
-        ? `${runnerUp.year} ${runnerUp.make} ${runnerUp.model} trailed the top result on ${scoreWeightLabels[strongestGap.category]} by ${categoryGap} points.`
+        ? `${runnerUp.year} ${runnerUp.make} ${runnerUp.model} received ${categoryGap} fewer weighted points from ${scoreWeightLabels[strongestGap.category]}.`
         : penaltyGap > 0
           ? `${runnerUp.year} ${runnerUp.make} ${runnerUp.model} had ${Math.round(penaltyGap)} more penalty points than the top result.`
           : `${runnerUp.year} ${runnerUp.make} ${runnerUp.model} had a lower overall match score after weighted ranking.`;
@@ -619,6 +675,11 @@ function getRunnerUpLossReasons(topVehicles: ScoredVehicle[]): CandidatePipeline
       categoryGap: Math.max(0, categoryGap),
     };
   });
+}
+
+function getCategoryContribution(vehicle: ScoredVehicle, category: CategoryKey) {
+  return vehicle.scoreContributions.find((contribution) => contribution.category === category)
+    ?.weightedContribution || 0;
 }
 
 export function getRequirementMatches(profile: BuyerProfile, vehicles: Vehicle[]) {
@@ -655,70 +716,10 @@ export function normalizeScoreWeights(weights: ScoreWeights) {
 }
 
 export function getDynamicScoreWeights(profile: BuyerProfile): ScoreWeights {
-  const baseWeights = normalizeScoreWeights(profile.scoreWeights);
-  const multipliers: Record<CategoryKey, number> = {
-    affordability: getAffordabilityPriorityMultiplier(profile),
-    reliability: getImportanceMultiplier(getNumericImportanceLevel(profile.reliabilityImportance)),
-    safety: getImportanceMultiplier(getSafetyImportanceLevel(profile.safetyPriority)),
-    fuelEnergyCost: getImportanceMultiplier(getNumericImportanceLevel(profile.fuelEconomyImportance)),
-    insuranceCost: profile.insuranceBudget ? 1.15 : 1,
-    maintenanceRisk: profile.reliabilityImportance >= 4 ? 1.18 : 1,
-    practicality: getPracticalityPriorityMultiplier(profile),
-    resaleValue: getImportanceMultiplier(getNumericImportanceLevel(profile.resaleValueImportance)),
-    drivingPreferenceFit: getDrivingPriorityMultiplier(profile),
-  };
-
-  const scaled = Object.fromEntries(
-    categoryKeys.map((key) => [key, Math.max(0, baseWeights[key] * multipliers[key])]),
-  ) as ScoreWeights;
-
-  return normalizeScoreWeights(scaled);
-}
-
-function getImportanceMultiplier(level: ImportanceLevel) {
-  const multipliers: Record<ImportanceLevel, number> = {
-    low: 0.72,
-    normal: 1,
-    important: 1.35,
-    "very-important": 1.75,
-  };
-  return multipliers[level];
-}
-
-function getNumericImportanceLevel(value: number): ImportanceLevel {
-  if (value <= 2) return "low";
-  if (value === 3) return "normal";
-  if (value === 4) return "important";
-  return "very-important";
-}
-
-function getSafetyImportanceLevel(value: BuyerProfile["safetyPriority"]): ImportanceLevel {
-  if (value === "standard") return "normal";
-  if (value === "high") return "important";
-  if (value === "maximum") return "very-important";
-  return "normal";
-}
-
-function getAffordabilityPriorityMultiplier(profile: BuyerProfile) {
-  if (profile.paymentMethod === "cash") return 1.28;
-  if (profile.maxPurchaseBudget <= 12000 || profile.monthlyBudget <= 450) return 1.2;
-  return 1;
-}
-
-function getPracticalityPriorityMultiplier(profile: BuyerProfile) {
-  let multiplier = 1;
-  if (profile.cargoNeed === "high") multiplier *= 1.35;
-  if (profile.familySize >= 4) multiplier *= 1.3;
-  if (profile.bodyStyle !== "any") multiplier *= 1.18;
-  if (profile.climate === "snow" || profile.climate === "rain") multiplier *= 1.12;
-  return Math.min(multiplier, 1.55);
-}
-
-function getDrivingPriorityMultiplier(profile: BuyerProfile) {
-  const performanceMultiplier = getImportanceMultiplier(getNumericImportanceLevel(profile.performanceImportance));
-  const featureMultiplier = getImportanceMultiplier(getNumericImportanceLevel(profile.advancedFeaturesImportance));
-  const makeMultiplier = profile.requiredMake || profile.preferredMake ? 1.25 : 1;
-  return Math.max(performanceMultiplier, featureMultiplier) * makeMultiplier;
+  return resolveEffectiveScoringPolicy({
+    profile,
+    baseWeights: profile.scoreWeights,
+  }).effectiveWeights;
 }
 
 function createCandidateDraft(
@@ -762,6 +763,7 @@ function addSuitabilityScores(
   profile: BuyerProfile,
   budget: BudgetSummary,
   maxPrice: number,
+  effectiveScoringPolicy: EffectiveScoringPolicy,
 ): ScoreDraft {
   const ownership = {
     maintenanceMonthly: draft.ownership.maintenanceMonthly,
@@ -773,7 +775,14 @@ function addSuitabilityScores(
 
   return {
     ...draft,
-    rawScores: getRawCategoryScores(draft.vehicle, profile, budget, maxPrice, ownership),
+    rawScores: getRawCategoryScores(
+      draft.vehicle,
+      profile,
+      budget,
+      maxPrice,
+      ownership,
+      effectiveScoringPolicy,
+    ),
     reasons: [],
     misses: [],
     penalties: getSoftPenalties(draft.vehicle, profile, ownership),
@@ -783,28 +792,64 @@ function addSuitabilityScores(
 function finalizeScoreDraft(
   draft: ScoreDraft,
   profile: BuyerProfile,
-  normalizedWeights: ScoreWeights,
+  effectiveScoringPolicy: EffectiveScoringPolicy,
   categoryStats: Record<CategoryKey, { min: number; max: number }>,
 ): ScoredVehicle {
   const scoreBreakdown = Object.fromEntries(
     categoryKeys.map((key) => [key, Math.round(normalizeCategoryScore(draft.rawScores[key], categoryStats[key]))]),
   ) as Record<CategoryKey, number>;
-  const weightedContributions = Object.fromEntries(
-    categoryKeys.map((key) => [key, Math.round((scoreBreakdown[key] * normalizedWeights[key]) / 100)]),
-  ) as Record<CategoryKey, number>;
-  const positiveContributions = categoryKeys
-    .map((key) => ({
+  const scoreContributions = categoryKeys.map<ScoreContributionRecord>((key) => {
+    const policy = effectiveScoringPolicy.categories[key];
+    const weightedContribution = policy.scoringEnabled
+      ? Math.round((scoreBreakdown[key] * policy.normalizedEffectiveWeight) / 100)
+      : 0;
+    return {
       category: key,
-      label: scoreWeightLabels[key],
-      score: scoreBreakdown[key],
-      weight: Math.round(normalizedWeights[key]),
-      points: weightedContributions[key],
+      rawCategoryScore: roundContribution(draft.rawScores[key]),
+      normalizedCategoryScore: scoreBreakdown[key],
+      baseWeight: roundContribution(policy.baseWeight),
+      effectiveRawWeight: roundContribution(policy.effectiveRawWeight),
+      normalizedEffectiveWeight: roundContribution(policy.normalizedEffectiveWeight),
+      weightedContribution,
+      participation: policy.participation,
+      importance: policy.importance,
+      source: policy.source,
+      dataStatus: getContributionDataStatus(draft.vehicle, key),
+      affectedRanking: policy.scoringEnabled && weightedContribution !== 0,
+    };
+  });
+  const weightedContributions = Object.fromEntries(
+    scoreContributions.map((contribution) => [
+      contribution.category,
+      contribution.weightedContribution,
+    ]),
+  ) as Record<CategoryKey, number>;
+  const positiveContributions = scoreContributions
+    .map((contribution) => ({
+      category: contribution.category,
+      label: scoreWeightLabels[contribution.category],
+      score: contribution.normalizedCategoryScore,
+      weight: Math.round(contribution.normalizedEffectiveWeight),
+      points: contribution.weightedContribution,
     }))
-    .filter((contribution) => contribution.points > 0)
+    .filter((contribution) =>
+      contribution.points > 0
+      && effectiveScoringPolicy.categories[contribution.category].mayAppearInExplanations
+      && isScoreCategoryVisible(profile, contribution.category),
+    )
     .sort((a, b) => b.points - a.points);
-  const penaltyTotal = draft.penalties.reduce((sum, penalty) => sum + penalty.points, 0);
-  const weightedScore = Object.values(weightedContributions).reduce((sum, value) => sum + value, 0);
-  const score = Math.round(clamp(weightedScore - penaltyTotal));
+  const activePenalties = draft.penalties.filter((penalty) =>
+    (effectiveScoringPolicy.legacyProfile || penalty.label !== "Ownership cost concern")
+    && effectiveScoringPolicy.categories[mapPenaltyToCategory(penalty.label).category].scoringEnabled,
+  );
+  const penaltyTotal = activePenalties.reduce((sum, penalty) => sum + penalty.points, 0);
+  const weightedScoreBeforePenalties = scoreContributions.reduce(
+    (sum, contribution) => sum + contribution.weightedContribution,
+    0,
+  );
+  const score = effectiveScoringPolicy.mode === "constraint_only"
+    ? 0
+    : Math.round(clamp(weightedScoreBeforePenalties - penaltyTotal));
 
   return {
     ...draft.vehicle,
@@ -824,9 +869,13 @@ function finalizeScoreDraft(
     },
     scoreBreakdown,
     weightedContributions,
-    categoryWeights: normalizedWeights,
+    categoryWeights: effectiveScoringPolicy.effectiveWeights,
+    effectiveScoringPolicy,
+    scoreContributions,
+    weightedScoreBeforePenalties,
+    penaltyTotal,
     positiveContributions,
-    penalties: draft.penalties,
+    penalties: activePenalties,
     hardConstraintStatus: draft.hardConstraintStatus,
     assumptions: draft.assumptions,
     missingDataWarnings: draft.missingDataWarnings,
@@ -863,9 +912,19 @@ function buildRecommendationObject(vehicle: ScoredVehicle, candidatePool: Scored
     hardConstraintsPassed,
     softPreferenceScore,
     overallMatchScore: vehicle.score,
-    recommendationConfidence: getRecommendationConfidence(vehicle, softPreferenceScore, dataQualityConfidence),
+    effectiveScoringPolicy: vehicle.effectiveScoringPolicy,
+    scoreContributions: vehicle.scoreContributions,
+    weightedScoreBeforePenalties: vehicle.weightedScoreBeforePenalties,
+    penaltyTotal: vehicle.penaltyTotal,
+    recommendationConfidence: getRecommendationConfidence(
+      vehicle,
+      softPreferenceScore,
+      dataQualityConfidence,
+      candidatePool,
+      profile,
+    ),
     dataQualityConfidence,
-    reasonsForRecommendation: getRecommendationSignals(vehicle),
+    reasonsForRecommendation: getRecommendationSignals(vehicle, profile),
     tradeoffs: getRecommendationTradeoffs(vehicle, profile),
     assumptionsUsed: getStructuredAssumptions(vehicle),
     estimatedFields: getEstimatedFields(vehicle),
@@ -894,6 +953,10 @@ function getSourceVehicle(vehicle: ScoredVehicle): Vehicle {
     scoreBreakdown: _scoreBreakdown,
     weightedContributions: _weightedContributions,
     categoryWeights: _categoryWeights,
+    effectiveScoringPolicy: _effectiveScoringPolicy,
+    scoreContributions: _scoreContributions,
+    weightedScoreBeforePenalties: _weightedScoreBeforePenalties,
+    penaltyTotal: _penaltyTotal,
     positiveContributions: _positiveContributions,
     penalties: _penalties,
     hardConstraintStatus: _hardConstraintStatus,
@@ -918,20 +981,28 @@ function getHardConstraintResults(vehicle: ScoredVehicle): HardConstraintResult[
 }
 
 function getSoftPreferenceScore(vehicle: ScoredVehicle) {
-  const scores = [
-    vehicle.scoreBreakdown.reliability,
-    vehicle.scoreBreakdown.safety,
-    vehicle.scoreBreakdown.fuelEnergyCost,
-    vehicle.scoreBreakdown.insuranceCost,
-    vehicle.scoreBreakdown.maintenanceRisk,
-    vehicle.scoreBreakdown.practicality,
-    vehicle.scoreBreakdown.resaleValue,
-    vehicle.scoreBreakdown.drivingPreferenceFit,
-  ];
-  return Math.round(clamp(average(scores) - vehicle.penalties.reduce((sum, penalty) => sum + penalty.points, 0) * 0.35));
+  const contributions = vehicle.scoreContributions.filter(
+    (contribution) => contribution.category !== "affordability" && contribution.affectedRanking,
+  );
+  const totalWeight = contributions.reduce(
+    (sum, contribution) => sum + contribution.normalizedEffectiveWeight,
+    0,
+  );
+  if (!totalWeight) return 0;
+  const weightedAverage = contributions.reduce(
+    (sum, contribution) =>
+      sum + contribution.normalizedCategoryScore * contribution.normalizedEffectiveWeight,
+    0,
+  ) / totalWeight;
+  return Math.round(
+    clamp(
+      weightedAverage
+      - vehicle.penalties.reduce((sum, penalty) => sum + penalty.points, 0) * 0.35,
+    ),
+  );
 }
 
-function getRecommendationSignals(vehicle: ScoredVehicle): RecommendationSignal[] {
+function getRecommendationSignals(vehicle: ScoredVehicle, profile: BuyerProfile): RecommendationSignal[] {
   const failedCategories = new Set(
     vehicle.hardConstraintStatus.failures.map((constraint) => getConstraintCategory(constraint.code)).filter(Boolean),
   );
@@ -944,11 +1015,13 @@ function getRecommendationSignals(vehicle: ScoredVehicle): RecommendationSignal[
     score: contribution.score,
     weight: contribution.weight,
     contribution: contribution.points,
-  })).filter((signal) => !failedCategories.has(signal.category));
+  })).filter(
+    (signal) => !failedCategories.has(signal.category) && isScoreCategoryVisible(profile, signal.category),
+  );
 }
 
 function getRecommendationTradeoffs(vehicle: ScoredVehicle, profile: BuyerProfile): RecommendationTradeoff[] {
-  const tradeoffs: RecommendationTradeoff[] = vehicle.penalties.map((penalty) => {
+  const tradeoffs: RecommendationTradeoff[] = vehicle.penalties.map<RecommendationTradeoff>((penalty) => {
     const mapped = mapPenaltyToCategory(penalty.label);
     return {
       code: toCode(penalty.label),
@@ -958,7 +1031,7 @@ function getRecommendationTradeoffs(vehicle: ScoredVehicle, profile: BuyerProfil
       severity: penalty.points >= 10 ? "high" : penalty.points >= 7 ? "medium" : "low",
       penaltyPoints: penalty.points,
     };
-  });
+  }).filter((tradeoff) => isScoreCategoryVisible(profile, tradeoff.category));
 
   if (profile.preferredMake?.trim() && normalizeText(vehicle.make) !== normalizeText(profile.preferredMake)) {
     tradeoffs.push({
@@ -1139,9 +1212,37 @@ function getRecommendationConfidence(
   vehicle: ScoredVehicle,
   softPreferenceScore: number,
   dataQualityConfidence: RecommendationConfidence,
+  candidatePool: ScoredVehicle[],
+  profile: BuyerProfile,
 ): RecommendationConfidence {
   const penaltyTotal = vehicle.penalties.reduce((sum, penalty) => sum + penalty.points, 0);
-  const score = Math.round(clamp(vehicle.score * 0.55 + softPreferenceScore * 0.25 + dataQualityConfidence.score * 0.2 - penaltyTotal * 0.25));
+  const index = candidatePool.findIndex((candidate) => candidate.id === vehicle.id);
+  const nextCandidate = index >= 0 ? candidatePool[index + 1] : undefined;
+  const scoreGap = nextCandidate ? Math.max(0, vehicle.score - nextCandidate.score) : 0;
+  const activeDimensionCount =
+    vehicle.scoreContributions.filter((contribution) => contribution.affectedRanking).length
+    + vehicle.effectiveScoringPolicy.effectiveHardConstraints.filter((constraint) => constraint.enforced).length;
+  const unresolvedDimensionCount = Object.values(profile.decisionPolicies || {}).filter(
+    (policy) => policy?.participation === "unresolved",
+  ).length;
+  const compromisePenalty = vehicle.hardConstraintStatus.status === "compromise" ? 8 : 0;
+  const legacyScore =
+    vehicle.score * 0.55
+    + softPreferenceScore * 0.25
+    + dataQualityConfidence.score * 0.2
+    - penaltyTotal * 0.25;
+  const policyScore =
+    vehicle.score * 0.48
+    + softPreferenceScore * 0.2
+    + dataQualityConfidence.score * 0.2
+    + Math.min(8, activeDimensionCount * 1.25)
+    + Math.min(8, scoreGap * 1.5)
+    - unresolvedDimensionCount * 4
+    - compromisePenalty
+    - penaltyTotal * 0.25;
+  const score = Math.round(
+    clamp(vehicle.effectiveScoringPolicy.legacyProfile ? legacyScore : policyScore),
+  );
   return {
     score,
     level: score >= 78 ? "high" : score >= 58 ? "medium" : "low",
@@ -1151,21 +1252,102 @@ function getRecommendationConfidence(
       { code: "data_quality_confidence", value: dataQualityConfidence.score, impact: dataQualityConfidence.score >= 70 ? "positive" : "neutral" },
       { code: "penalty_total", value: penaltyTotal, impact: penaltyTotal ? "negative" : "positive" },
       { code: "qualified", value: vehicle.hardConstraintStatus.passed, impact: vehicle.hardConstraintStatus.passed ? "positive" : "negative" },
+      { code: "active_dimension_count", value: activeDimensionCount, impact: activeDimensionCount ? "positive" : "negative" },
+      { code: "score_gap_to_next", value: scoreGap, impact: scoreGap >= 5 ? "positive" : "neutral" },
+      { code: "unresolved_dimension_count", value: unresolvedDimensionCount, impact: unresolvedDimensionCount ? "negative" : "positive" },
+      { code: "compromise_used", value: vehicle.hardConstraintStatus.status === "compromise", impact: compromisePenalty ? "negative" : "positive" },
     ],
   };
 }
 
 function getDataQualityConfidence(vehicle: ScoredVehicle): RecommendationConfidence {
+  const activeContributions = vehicle.scoreContributions.filter(
+    (contribution) => contribution.normalizedEffectiveWeight > 0,
+  );
+  const totalWeight = activeContributions.reduce(
+    (sum, contribution) => sum + contribution.normalizedEffectiveWeight,
+    0,
+  );
+  const coverageScore = totalWeight
+    ? activeContributions.reduce((sum, contribution) => {
+        const evidenceFactor =
+          contribution.dataStatus === "available"
+            ? 1
+            : contribution.dataStatus === "estimated"
+              ? 0.72
+              : 0;
+        return sum + contribution.normalizedEffectiveWeight * evidenceFactor;
+      }, 0) / totalWeight * 100
+    : getSourceQuality(vehicle.dataSources || ["seed"]) * 100;
+  const sourceQuality = getPolicyAwareSourceQuality(vehicle) * 100;
+  const estimatedCount = activeContributions.filter(
+    (contribution) => contribution.dataStatus === "estimated",
+  ).length;
+  const missingCount = activeContributions.filter(
+    (contribution) => contribution.dataStatus === "missing",
+  ).length;
+  const topPriorityMissingWeight = activeContributions
+    .filter(
+      (contribution) =>
+        contribution.dataStatus !== "available"
+        && contribution.normalizedEffectiveWeight >= 20,
+    )
+    .reduce((sum, contribution) => sum + contribution.normalizedEffectiveWeight, 0);
+  const score = Math.round(
+    clamp(
+      coverageScore * 0.68
+      + sourceQuality * 0.32
+      - missingCount * 4
+      - topPriorityMissingWeight * 0.08,
+    ),
+  );
+  const listingUsed = vehicle.effectiveScoringPolicy.categories.affordability.scoringEnabled;
   return {
-    score: vehicle.confidence.score,
-    level: vehicle.confidence.level,
+    score,
+    level: score >= 78 ? "high" : score >= 58 ? "medium" : "low",
     factors: [
-      { code: "data_completeness", value: vehicle.confidence.score, impact: vehicle.confidence.score >= 70 ? "positive" : "neutral" },
-      { code: "assumption_count", value: vehicle.assumptions.length, impact: vehicle.assumptions.length ? "negative" : "positive" },
-      { code: "missing_information_count", value: vehicle.missingDataWarnings.length, impact: vehicle.missingDataWarnings.length ? "negative" : "positive" },
-      { code: "has_listing_api", value: Boolean(vehicle.dataSources?.includes("listing-api")), impact: vehicle.dataSources?.includes("listing-api") ? "positive" : "negative" },
+      { code: "active_category_evidence_coverage", value: Math.round(coverageScore), impact: coverageScore >= 75 ? "positive" : coverageScore >= 55 ? "neutral" : "negative" },
+      { code: "active_estimated_category_count", value: estimatedCount, impact: estimatedCount ? "neutral" : "positive" },
+      { code: "active_missing_category_count", value: missingCount, impact: missingCount ? "negative" : "positive" },
+      { code: "top_priority_unverified_weight", value: roundContribution(topPriorityMissingWeight), impact: topPriorityMissingWeight ? "negative" : "positive" },
+      {
+        code: "has_listing_api",
+        value: Boolean(vehicle.dataSources?.includes("listing-api")),
+        impact: !listingUsed
+          ? "neutral"
+          : vehicle.dataSources?.includes("listing-api")
+            ? "positive"
+            : "negative",
+      },
     ],
   };
+}
+
+function getPolicyAwareSourceQuality(vehicle: ScoredVehicle) {
+  const sources = vehicle.dataSources || ["seed"];
+  const active = vehicle.effectiveScoringPolicy.categories;
+  let quality = sources.includes("seed") ? 0.62 : 0.56;
+  let activeSourceCount = 0;
+  if (active.affordability.scoringEnabled && sources.includes("listing-api")) {
+    quality = Math.max(quality, 0.9);
+    activeSourceCount += 1;
+  }
+  if (active.safety.scoringEnabled && sources.includes("nhtsa")) {
+    quality = Math.max(quality, 0.78);
+    activeSourceCount += 1;
+  }
+  if (active.fuelEnergyCost.scoringEnabled && sources.includes("fueleconomy.gov")) {
+    quality = Math.max(quality, 0.82);
+    activeSourceCount += 1;
+  }
+  if (
+    (active.reliability.scoringEnabled || active.maintenanceRisk.scoringEnabled)
+    && sources.includes("csv-import")
+  ) {
+    quality = Math.max(quality, 0.72);
+    activeSourceCount += 1;
+  }
+  return Math.min(1, quality + Math.max(0, activeSourceCount - 1) * 0.04);
 }
 
 function getBetterAlternativesIfConstraintsChange(vehicle: ScoredVehicle, candidatePool: ScoredVehicle[]): BetterAlternative[] {
@@ -1197,6 +1379,45 @@ function getCategoryStats(drafts: ScoreDraft[]) {
   ) as Record<CategoryKey, { min: number; max: number }>;
 }
 
+function getCatalogScoringCapabilities(
+  vehicles: Vehicle[],
+): Partial<Record<CategoryKey, boolean>> {
+  const hasFinite = (selector: (vehicle: Vehicle) => number) =>
+    vehicles.some((vehicle) => Number.isFinite(selector(vehicle)));
+  return {
+    affordability: hasFinite((vehicle) => vehicle.price),
+    reliability: hasFinite((vehicle) => vehicle.reliabilityScore),
+    safety: hasFinite((vehicle) => vehicle.safetyScore),
+    fuelEnergyCost: hasFinite((vehicle) => vehicle.mpg),
+    insuranceCost: hasFinite((vehicle) => vehicle.insurance),
+    maintenanceRisk: hasFinite((vehicle) => vehicle.reliabilityScore),
+    practicality: hasFinite((vehicle) => vehicle.seats),
+    resaleValue: hasFinite((vehicle) => vehicle.resaleScore),
+    drivingPreferenceFit: hasFinite((vehicle) => vehicle.performanceScore),
+  };
+}
+
+function getContributionDataStatus(
+  vehicle: Vehicle,
+  category: CategoryKey,
+): ContributionDataStatus {
+  const sources = vehicle.dataSources || [];
+  if (category === "reliability") return sources.includes("csv-import") ? "available" : "estimated";
+  if (category === "fuelEnergyCost") return sources.includes("fueleconomy.gov") ? "available" : "estimated";
+  if (category === "insuranceCost") return "estimated";
+  if (category === "maintenanceRisk") {
+    return vehicle.maintenanceEstimate === undefined ? "estimated" : "available";
+  }
+  if (category === "resaleValue") {
+    return vehicle.depreciationEstimate === undefined ? "estimated" : "available";
+  }
+  return "available";
+}
+
+function roundContribution(value: number) {
+  return Number(value.toFixed(4));
+}
+
 function normalizeCategoryScore(rawScore: number, stats: { min: number; max: number }) {
   const raw = clamp(rawScore);
   const spread = stats.max - stats.min;
@@ -1212,10 +1433,16 @@ function getRawCategoryScores(
   budget: BudgetSummary,
   maxPrice: number,
   ownership: OwnershipEstimates,
+  effectiveScoringPolicy: EffectiveScoringPolicy,
 ): Record<CategoryKey, number> {
   const priceFit = scoreLowerCost(vehicle.price, maxPrice, 0.58, 1.18);
   const paymentFit = getPaymentFit(ownership.estimatedPayment, budget.paymentBudget, profile);
-  const affordability = priceFit * 0.55 + paymentFit * 0.45;
+  const affordability = getPolicyAwareAffordabilityScore(
+    profile,
+    priceFit,
+    paymentFit,
+    effectiveScoringPolicy,
+  );
   const reliability = getReliabilityFit(vehicle, profile);
   const safety = getSafetyFit(vehicle, profile);
   const mpgFit = getFuelEconomyFit(vehicle, profile);
@@ -1239,6 +1466,28 @@ function getRawCategoryScores(
     resaleValue,
     drivingPreferenceFit,
   };
+}
+
+function getPolicyAwareAffordabilityScore(
+  profile: BuyerProfile,
+  priceFit: number,
+  paymentFit: number,
+  effectiveScoringPolicy: EffectiveScoringPolicy,
+) {
+  if (!effectiveScoringPolicy.categories.affordability.scoringEnabled) return 0;
+  const purchaseParticipation = profile.decisionPolicies?.purchaseBudget?.participation;
+  const monthlyParticipation = profile.decisionPolicies?.monthlyPayment?.participation;
+  const purchaseEnabled =
+    purchaseParticipation !== "disabled"
+    && purchaseParticipation !== "unresolved";
+  const monthlyEnabled =
+    profile.paymentMethod !== "cash"
+    && monthlyParticipation !== "disabled"
+    && monthlyParticipation !== "unresolved";
+  if (purchaseEnabled && monthlyEnabled) return priceFit * 0.55 + paymentFit * 0.45;
+  if (purchaseEnabled) return priceFit;
+  if (monthlyEnabled) return paymentFit;
+  return 0;
 }
 
 function getHardConstraintStatus(
@@ -1270,7 +1519,14 @@ function getHardConstraintStatus(
     });
   }
 
-  if (profile.requiredMake?.trim()) {
+  addModernDimensionConstraints(results, profile, vehicle, "make", "make", vehicle.make);
+  addModernDimensionConstraints(results, profile, vehicle, "bodyStyle", "bodyStyle", vehicle.bodyType);
+  addModernDimensionConstraints(results, profile, vehicle, "vehicleCategory", "bodyStyle", vehicle.bodyType);
+  addModernDimensionConstraints(results, profile, vehicle, "fuelType", "fuelType", vehicle.fuelType);
+  addModernDimensionConstraints(results, profile, vehicle, "drivetrain", "drivetrain", vehicle.drivetrain);
+  addModernDimensionConstraints(results, profile, vehicle, "transmission", "transmission", vehicle.transmission);
+
+  if (!hasModernDimension(profile, "make") && profile.requiredMake?.trim()) {
     const requiredMake = normalizeText(profile.requiredMake);
     addConstraintResult(results, profile, {
       code: "make",
@@ -1282,8 +1538,32 @@ function getHardConstraintStatus(
     });
   }
 
-  if (profile.bodyStyle !== "any") {
+  if (!hasModernDimension(profile, "make") && profile.allowedMakes?.length) {
+    const allowedMakes = profile.allowedMakes.map(normalizeText);
     addConstraintResult(results, profile, {
+      code: "make",
+      label: "Allowed makes",
+      passed: allowedMakes.includes(normalizeText(vehicle.make)),
+      actual: vehicle.make,
+      limit: profile.allowedMakes.join(", "),
+      exclusionReason: `${vehicle.make} is not one of the allowed makes: ${profile.allowedMakes.join(", ")}`,
+    });
+  }
+
+  if (!hasModernDimension(profile, "make") && profile.excludedMakes?.length) {
+    const excludedMakes = profile.excludedMakes.map(normalizeText);
+    addExclusionConstraintResult(results, {
+      code: "make",
+      label: "Excluded make",
+      passed: !excludedMakes.includes(normalizeText(vehicle.make)),
+      actual: vehicle.make,
+      limit: profile.excludedMakes.join(", "),
+      exclusionReason: `${vehicle.make} was excluded by the current profile`,
+    });
+  }
+
+  if (!hasModernDimension(profile, "bodyStyle") && profile.bodyStyle !== "any") {
+    addBodyStyleConstraintResult(results, profile, {
       code: "bodyStyle",
       label: "Body style",
       passed: vehicle.bodyType === profile.bodyStyle,
@@ -1306,7 +1586,7 @@ function getHardConstraintStatus(
 
   if (profile.minYear) {
     addConstraintResult(results, profile, {
-      code: "purchaseCondition",
+      code: "minYear",
       label: "Minimum model year",
       passed: vehicle.year >= profile.minYear,
       actual: vehicle.year,
@@ -1315,7 +1595,7 @@ function getHardConstraintStatus(
     });
   }
 
-  if (profile.drivetrainPreference !== "any") {
+  if (!hasModernDimension(profile, "drivetrain") && profile.drivetrainPreference !== "any") {
     addConstraintResult(results, profile, {
       code: "drivetrain",
       label: "Drivetrain",
@@ -1332,7 +1612,7 @@ function getHardConstraintStatus(
       (profile.purchaseCondition === "new" && vehicle.year >= currentYear - 1) ||
       (profile.purchaseCondition === "used" && vehicle.year < currentYear);
     addConstraintResult(results, profile, {
-      code: "minYear",
+      code: "purchaseCondition",
       label: "Purchase condition",
       passed: passesCondition,
       actual: vehicle.year,
@@ -1344,7 +1624,7 @@ function getHardConstraintStatus(
     });
   }
 
-  if (profile.transmissionPreference !== "any") {
+  if (!hasModernDimension(profile, "transmission") && profile.transmissionPreference !== "any") {
     addConstraintResult(results, profile, {
       code: "transmission",
       label: "Transmission",
@@ -1366,7 +1646,7 @@ function getHardConstraintStatus(
     });
   }
 
-  if (profile.requiredFuelType) {
+  if (!hasModernDimension(profile, "fuelType") && profile.requiredFuelType) {
     addConstraintResult(results, profile, {
       code: "fuelType",
       label: "Fuel type",
@@ -1429,12 +1709,153 @@ function addConstraintResult(
   profile: BuyerProfile,
   result: Omit<HardConstraintResult, "flexible">,
 ) {
+  const dimension = decisionDimensionForConstraint(result.code);
+  const explicitScoreThreshold =
+    result.code === "reliabilityMinimum"
+    || result.code === "safetyMinimum"
+    || result.code === "performanceMinimum";
+  const thresholdPolicy = dimension ? profile.decisionPolicies?.[dimension] : undefined;
+  if (
+    dimension
+    && !shouldEnforceDecisionDimension(profile, dimension)
+    && !(explicitScoreThreshold && thresholdPolicy?.participation === "active")
+  ) {
+    return;
+  }
   const flexible = Boolean(profile.flexibleConstraints?.includes(result.code));
   results.push({
     ...result,
     flexible,
     exclusionReason: result.passed ? undefined : result.exclusionReason,
   });
+}
+
+function addExclusionConstraintResult(
+  results: HardConstraintResult[],
+  result: Omit<HardConstraintResult, "flexible">,
+) {
+  results.push({
+    ...result,
+    flexible: false,
+    exclusionReason: result.passed ? undefined : result.exclusionReason,
+  });
+}
+
+function hasModernDimension(profile: BuyerProfile, dimension: ProfileDimension) {
+  return hasCanonicalDimensionState(profile, dimension);
+}
+
+function addModernDimensionConstraints(
+  results: HardConstraintResult[],
+  profile: BuyerProfile,
+  vehicle: Vehicle,
+  dimension: ProfileDimension,
+  code: ConstraintKey,
+  actual: string,
+) {
+  if (!hasModernDimension(profile, dimension)) return;
+  const policyDimension = decisionDimensionForConstraint(code);
+  const state = getProfileDimensionState(profile, dimension);
+  const matches = (value: string) => dimension === "drivetrain"
+    ? stateValueMatchesDrivetrain(actual, value)
+    : dimension === "transmission"
+      ? stateValueMatchesTransmission(actual, value)
+    : normalizeText(actual) === normalizeText(value);
+  const requiredMatch = state.required.some(matches);
+  const preferredMatch = state.preferred.some(matches);
+  const allowedMatch = state.allowed.some(matches);
+  const excludedMatch = state.excluded.some(matches);
+
+  if (
+    state.required.length
+    && (!policyDimension || shouldEnforceDecisionDimension(profile, policyDimension))
+  ) {
+    results.push({
+      code,
+      label: `Required ${dimensionLabel(dimension)}`,
+      passed: requiredMatch,
+      actual,
+      limit: state.required.join(", "),
+      flexible: !requiredMatch && allowedMatch,
+      exclusionReason: requiredMatch
+        ? undefined
+        : allowedMatch
+          ? `${actual} is an explicitly allowed fallback for ${dimensionLabel(dimension)}`
+          : `${actual} does not match required ${dimensionLabel(dimension)}: ${state.required.join(", ")}`,
+    });
+  }
+
+  const allowedUniverse = [...state.preferred, ...state.allowed];
+  if (
+    !state.required.length
+    && state.preferred.length
+    && state.allowed.length
+    && (!policyDimension || !isDecisionDimensionDisabled(profile, policyDimension))
+  ) {
+    addExclusionConstraintResult(results, {
+      code,
+      label: `Allowed ${dimensionLabel(dimension)}`,
+      passed: preferredMatch || allowedMatch,
+      actual,
+      limit: allowedUniverse.join(", "),
+      exclusionReason: `${actual} is outside the preferred and explicitly allowed ${dimensionLabel(dimension)}: ${allowedUniverse.join(", ")}`,
+    });
+  }
+
+  if (state.excluded.length) {
+    addExclusionConstraintResult(results, {
+      code,
+      label: `Excluded ${dimensionLabel(dimension)}`,
+      passed: !excludedMatch,
+      actual,
+      limit: state.excluded.join(", "),
+      exclusionReason: `${actual} was excluded by the current profile`,
+    });
+  }
+}
+
+function stateValueMatchesDrivetrain(actual: string, expected: string) {
+  return drivetrainMeetsRequirement(actual, expected as BuyerProfile["drivetrainPreference"]);
+}
+
+function stateValueMatchesTransmission(actual: string, expected: string) {
+  return normalizeText(actual) === normalizeText(expected);
+}
+
+function dimensionLabel(dimension: ProfileDimension) {
+  return dimension === "bodyStyle" ? "body styles"
+    : dimension === "vehicleCategory" ? "vehicle categories"
+      : dimension === "fuelType" ? "fuel types"
+        : `${dimension}s`;
+}
+
+function addBodyStyleConstraintResult(
+  results: HardConstraintResult[],
+  profile: BuyerProfile,
+  result: Omit<HardConstraintResult, "flexible">,
+) {
+  if (!shouldEnforceDecisionDimension(profile, "bodyStyle")) return;
+  const flexible =
+    !result.passed &&
+    Boolean(profile.flexibleConstraints?.includes("bodyStyle")) &&
+    isAllowedBodyStyleCompromise(profile.bodyStyle, String(result.actual));
+  results.push({
+    ...result,
+    flexible,
+    exclusionReason: result.passed ? undefined : result.exclusionReason,
+  });
+}
+
+function isScoreCategoryVisible(profile: BuyerProfile, category: string) {
+  const dimension = policyDimensionForScoreCategory(category);
+  if (dimension && isDecisionDimensionDisabled(profile, dimension)) return false;
+  return true;
+}
+
+function isAllowedBodyStyleCompromise(requested: BuyerProfile["bodyStyle"], actual: string) {
+  if (requested === "truck") return actual === "suv";
+  if (requested === "suv") return actual === "truck" || actual === "minivan" || actual === "wagon";
+  return actual === requested;
 }
 
 function drivetrainMeetsRequirement(drivetrain: string, requirement: BuyerProfile["drivetrainPreference"]) {
@@ -1471,7 +1892,9 @@ function getFuelEconomyFit(vehicle: Vehicle, profile: BuyerProfile) {
   const target = profile.minMpg || (profile.expectedAnnualMileage >= 12000 ? 32 : 26);
   const maxRatio = vehicle.fuelType === "electric" ? 4.1 : vehicle.fuelType === "hybrid" ? 2.1 : 1.65;
   const base = scoreHigherAgainstTarget(vehicle.mpg, target, 0.68, maxRatio);
-  return applyImportance(base, profile.fuelEconomyImportance);
+  const fuelTypeFit = getCanonicalDimensionFit(profile, "fuelType", vehicle.fuelType);
+  const combined = fuelTypeFit === undefined ? base : base * 0.85 + fuelTypeFit * 0.15;
+  return applyImportance(combined, profile.fuelEconomyImportance);
 }
 
 function getReliabilityFit(vehicle: Vehicle, profile: BuyerProfile) {
@@ -1513,10 +1936,17 @@ function getDrivingPreferenceFit(vehicle: Vehicle, profile: BuyerProfile) {
   const modificationFit = getModificationFit(vehicle, profile);
   const featureFit = getFeatureFit(vehicle, profile);
 
-  return performanceFit * 0.42 + transmissionFit * 0.18 + drivetrainFit * 0.18 + modificationFit * 0.12 + featureFit * 0.1;
+  const base = performanceFit * 0.42 + transmissionFit * 0.18 + drivetrainFit * 0.18 + modificationFit * 0.12 + featureFit * 0.1;
+  const makeFit = getCanonicalDimensionFit(profile, "make", vehicle.make);
+  return makeFit === undefined ? base : base * 0.9 + makeFit * 0.1;
 }
 
 function getBodyStyleFit(vehicle: Vehicle, profile: BuyerProfile) {
+  const bodyStyleFit = getCanonicalDimensionFit(profile, "bodyStyle", vehicle.bodyType);
+  const categoryFit = getCanonicalDimensionFit(profile, "vehicleCategory", vehicle.bodyType);
+  if (bodyStyleFit !== undefined || categoryFit !== undefined) {
+    return Math.max(bodyStyleFit ?? 0, categoryFit ?? 0);
+  }
   if (profile.bodyStyle === "any") return beginnerFriendlyTypes.has(vehicle.bodyType) ? 76 : 58;
   if (vehicle.bodyType === profile.bodyStyle) return 100;
   if (profile.bodyStyle === "suv" && spaciousTypes.has(vehicle.bodyType)) return 56;
@@ -1524,6 +1954,8 @@ function getBodyStyleFit(vehicle: Vehicle, profile: BuyerProfile) {
 }
 
 function getDrivetrainFit(vehicle: Vehicle, profile: BuyerProfile) {
+  const canonicalFit = getCanonicalDimensionFit(profile, "drivetrain", vehicle.drivetrain);
+  if (canonicalFit !== undefined) return canonicalFit;
   if (profile.drivetrainPreference === "any") {
     if (profile.climate === "snow") return snowDrivetrains.has(vehicle.drivetrain) ? 96 : 28;
     return snowDrivetrains.has(vehicle.drivetrain) ? 78 : 72;
@@ -1535,9 +1967,35 @@ function getDrivetrainFit(vehicle: Vehicle, profile: BuyerProfile) {
 }
 
 function getTransmissionFit(vehicle: Vehicle, profile: BuyerProfile) {
+  const canonicalFit = getCanonicalDimensionFit(profile, "transmission", vehicle.transmission);
+  if (canonicalFit !== undefined) return canonicalFit;
   if (profile.transmissionPreference === "any") return vehicle.transmission === "manual" ? 70 : 78;
   if (profile.transmissionPreference === "automatic") return vehicle.transmission === "manual" ? 10 : 100;
   return vehicle.transmission === "manual" ? 100 : 10;
+}
+
+function getCanonicalDimensionFit(
+  profile: BuyerProfile,
+  dimension: ProfileDimension,
+  actual: string,
+) {
+  if (!hasModernDimension(profile, dimension)) return undefined;
+  const state = getProfileDimensionState(profile, dimension);
+  const matches = (expected: string) => dimension === "drivetrain"
+    ? stateValueMatchesDrivetrain(actual, expected)
+    : dimension === "transmission"
+      ? stateValueMatchesTransmission(actual, expected)
+      : normalizeText(actual) === normalizeText(expected);
+  if (state.excluded.some(matches)) return 0;
+  if (state.required.length) {
+    if (state.required.some(matches)) return 100;
+    if (state.allowed.some(matches)) return 62;
+    return 8;
+  }
+  if (state.preferred.some(matches)) return 100;
+  if (state.allowed.some(matches)) return state.preferred.length ? 68 : 86;
+  if (state.preferred.length) return 22;
+  return 72;
 }
 
 function getCargoFit(vehicle: Vehicle, profile: BuyerProfile) {

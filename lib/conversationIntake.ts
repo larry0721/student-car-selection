@@ -9,6 +9,28 @@ import {
   type PreferenceInterpretation,
   type PreferenceUncertainty,
 } from "./preferenceInterpretation";
+import {
+  preferenceInterpretationFromSemanticResult,
+  preferenceInterpretationFromValidatedUnderstanding,
+} from "./semanticPreferenceAdapter";
+import {
+  buildProfilePatch,
+  mergeCanonicalConcepts,
+  type CanonicalMappedConcept,
+} from "./semanticMapping";
+import { createSemanticUnderstandingService, type SemanticUnderstandingService } from "./semanticUnderstandingService";
+import {
+  understandDeterministically,
+  type ValidatedUnderstanding,
+} from "./semanticUnderstanding";
+import {
+  mergeDecisionParticipationPolicyMaps,
+  policyAllowsClarification,
+  policyIsPositiveCriterion,
+} from "./decisionParticipationPolicy";
+import { assessCatalogIntentFeasibility } from "./advisorIntegrity";
+import { vehicleCatalog } from "../data/vehicleCatalog";
+import type { BuyerProfile } from "../types/buyer";
 
 export type IntakeStatus =
   | "awaiting_initial_message"
@@ -21,6 +43,7 @@ export type IntakeTurnRole = "user" | "advisor";
 export type IntakeQuestionCode =
   | "performance_meaning"
   | "make_flexibility"
+  | "relationship_intent"
   | "budget_max"
   | "winter_traction"
   | "ownership_tradeoff"
@@ -55,6 +78,15 @@ export type ConversationIntakeSession = {
   unresolvedConflicts: PreferenceConflict[];
   interpretationConfidence: InterpretationConfidence;
   intakeStatus: IntakeStatus;
+  semanticUnderstanding?: ValidatedUnderstanding | null;
+  semanticProviderUsed?: "model" | "deterministic" | "fixture" | null;
+  semanticFallbackUsed?: boolean;
+  semanticFallbackReason?: string;
+  semanticProviderFailure?: {
+    code: string;
+    message: string;
+  };
+  baselineProfile?: BuyerProfile;
 };
 
 type ClarificationAnswerResult = {
@@ -68,12 +100,69 @@ type ClarificationAnswerResult = {
   newConflicts: PreferenceConflict[];
   acknowledgement: string;
   evidencePhrase: string;
+  canonicalMappings?: CanonicalMappedConcept[];
 };
 
 const maxClarifyingQuestions = 3;
 
 export function createConversationIntakeSession(rawUserMessage: string): ConversationIntakeSession {
   const accumulatedInterpretation = interpretPreferenceMessage(rawUserMessage);
+  return createConversationIntakeSessionFromInterpretation(rawUserMessage, accumulatedInterpretation, {
+    semanticUnderstanding: null,
+    semanticProviderUsed: "deterministic",
+    semanticFallbackUsed: true,
+  });
+}
+
+export function createDeterministicSemanticConversationIntakeSession(
+  rawUserMessage: string,
+): ConversationIntakeSession {
+  const validatedUnderstanding = understandDeterministically({
+    currentMessage: rawUserMessage,
+    conversationHistory: [{ id: "turn-1", role: "user", text: rawUserMessage }],
+  });
+  const accumulatedInterpretation = preferenceInterpretationFromValidatedUnderstanding(
+    rawUserMessage,
+    validatedUnderstanding,
+    "fallback",
+  );
+  return createConversationIntakeSessionFromInterpretation(rawUserMessage, accumulatedInterpretation, {
+    semanticUnderstanding: validatedUnderstanding,
+    semanticProviderUsed: "deterministic",
+    semanticFallbackUsed: true,
+  });
+}
+
+export async function createSemanticConversationIntakeSession(
+  rawUserMessage: string,
+  service: SemanticUnderstandingService = createSemanticUnderstandingService(),
+): Promise<ConversationIntakeSession> {
+  const semanticResult = await service.understand({
+    currentMessage: rawUserMessage,
+    conversationHistory: [{ id: "turn-1", role: "user", text: rawUserMessage }],
+  });
+  const accumulatedInterpretation = preferenceInterpretationFromSemanticResult(rawUserMessage, semanticResult);
+  return createConversationIntakeSessionFromInterpretation(rawUserMessage, accumulatedInterpretation, {
+    semanticUnderstanding: semanticResult.validatedUnderstanding,
+    semanticProviderUsed: semanticResult.providerUsed,
+    semanticFallbackUsed: semanticResult.fallbackUsed,
+    semanticFallbackReason: semanticResult.fallbackReason,
+    semanticProviderFailure: semanticResult.providerFailure,
+  });
+}
+
+function createConversationIntakeSessionFromInterpretation(
+  rawUserMessage: string,
+  accumulatedInterpretation: PreferenceInterpretation,
+  semanticMetadata: Pick<
+    ConversationIntakeSession,
+    | "semanticUnderstanding"
+    | "semanticProviderUsed"
+    | "semanticFallbackUsed"
+    | "semanticFallbackReason"
+    | "semanticProviderFailure"
+  >,
+): ConversationIntakeSession {
   const answeredQuestionIds: IntakeQuestionCode[] = [];
   const skippedQuestionIds: IntakeQuestionCode[] = [];
   const currentQuestion = selectNextQuestion(accumulatedInterpretation, answeredQuestionIds, skippedQuestionIds);
@@ -106,6 +195,7 @@ export function createConversationIntakeSession(rawUserMessage: string): Convers
       accumulatedInterpretation.conflicts,
     ),
     intakeStatus,
+    ...semanticMetadata,
   };
 
   return session;
@@ -125,7 +215,14 @@ export function answerConversationQuestion(session: ConversationIntakeSession, a
     result.newUncertainties,
   );
   const unresolvedConflicts = mergeConflicts(session.unresolvedConflicts, result.resolvedConflictTopics, result.newConflicts);
-  const nextQuestion = selectNextQuestion(mergedInterpretation, answeredQuestionIds, skippedQuestionIds, unresolvedUncertainties, unresolvedConflicts);
+  const nextQuestion = selectNextQuestion(
+    mergedInterpretation,
+    answeredQuestionIds,
+    skippedQuestionIds,
+    unresolvedUncertainties,
+    unresolvedConflicts,
+    session.baselineProfile,
+  );
   const intakeStatus: IntakeStatus = nextQuestion ? "awaiting_clarification" : "ready_for_confirmation";
   const nextSequence = session.conversationTurns.length + 1;
   const advisorText = nextQuestion
@@ -155,6 +252,88 @@ export function answerConversationQuestion(session: ConversationIntakeSession, a
   };
 }
 
+export async function answerConversationQuestionWithSemantic(
+  session: ConversationIntakeSession,
+  answer: string,
+  service: SemanticUnderstandingService = createSemanticUnderstandingService(),
+): Promise<ConversationIntakeSession> {
+  const trimmedAnswer = answer.trim();
+  if (!trimmedAnswer) return session;
+
+  const activeQuestion = session.currentQuestion;
+  const deterministicResult = activeQuestion
+    ? interpretClarificationAnswer(session, trimmedAnswer)
+    : emptyClarificationAnswerResult(trimmedAnswer);
+  const semanticResult = await service.understand({
+    currentMessage: trimmedAnswer,
+    conversationHistory: [
+      ...session.conversationTurns.map((turn) => ({
+        id: turn.id,
+        role: turn.role,
+        text: turn.text,
+        questionCode: turn.questionCode,
+      })),
+      { id: `turn-${session.conversationTurns.length + 1}`, role: "user", text: trimmedAnswer, questionCode: activeQuestion?.id },
+    ],
+    currentUnderstanding: session.semanticUnderstanding || undefined,
+  });
+  const semanticInterpretation = preferenceInterpretationFromSemanticResult(trimmedAnswer, semanticResult);
+  const semanticAnswer = clarificationResultFromSemanticInterpretation(semanticInterpretation, trimmedAnswer);
+  const result = mergeClarificationAnswerResults(deterministicResult, semanticAnswer);
+
+  const answeredQuestionIds = activeQuestion
+    ? [...session.answeredQuestionIds, activeQuestion.id]
+    : session.answeredQuestionIds;
+  const skippedQuestionIds = session.skippedQuestionIds;
+  const mergedInterpretation = mergePreferenceInterpretation(session.accumulatedInterpretation, result);
+  const unresolvedUncertainties = mergeUncertainties(
+    session.unresolvedUncertainties,
+    result.resolvedUncertaintyTopics,
+    result.newUncertainties,
+  );
+  const unresolvedConflicts = mergeConflicts(session.unresolvedConflicts, result.resolvedConflictTopics, result.newConflicts);
+  const nextQuestion = selectNextQuestion(
+    mergedInterpretation,
+    answeredQuestionIds,
+    skippedQuestionIds,
+    unresolvedUncertainties,
+    unresolvedConflicts,
+    session.baselineProfile,
+  );
+  const intakeStatus: IntakeStatus = nextQuestion ? "awaiting_clarification" : "ready_for_confirmation";
+  const nextSequence = session.conversationTurns.length + 1;
+  const advisorText = nextQuestion
+    ? `${result.acknowledgement} ${nextQuestion.text}`
+    : `${result.acknowledgement} I think I understand enough to summarize what you're looking for.`;
+
+  return {
+    ...session,
+    conversationTurns: [
+      ...session.conversationTurns,
+      createTurn(nextSequence, "user", trimmedAnswer, "clarification_answer", activeQuestion?.id),
+      createTurn(nextSequence + 1, "advisor", advisorText, "clarification_merge", nextQuestion?.id),
+    ],
+    accumulatedInterpretation: mergedInterpretation,
+    confirmedProfileUpdates: {
+      ...session.confirmedProfileUpdates,
+      ...getConfirmedProfileUpdates(mergedInterpretation),
+      ...getConfirmedProfileUpdatesFromResult(result),
+    },
+    pendingProfileUpdates: mergedInterpretation.suggestedProfileUpdates,
+    currentQuestion: nextQuestion,
+    answeredQuestionIds,
+    unresolvedUncertainties,
+    unresolvedConflicts,
+    interpretationConfidence: calculateInterpretationConfidence(mergedInterpretation, unresolvedUncertainties, unresolvedConflicts),
+    intakeStatus,
+    semanticUnderstanding: semanticResult.validatedUnderstanding || session.semanticUnderstanding || null,
+    semanticProviderUsed: semanticResult.providerUsed,
+    semanticFallbackUsed: semanticResult.fallbackUsed,
+    semanticFallbackReason: semanticResult.fallbackReason,
+    semanticProviderFailure: semanticResult.providerFailure,
+  };
+}
+
 export function skipConversationQuestion(session: ConversationIntakeSession): ConversationIntakeSession {
   if (!session.currentQuestion) return session;
 
@@ -165,6 +344,7 @@ export function skipConversationQuestion(session: ConversationIntakeSession): Co
     skippedQuestionIds,
     session.unresolvedUncertainties,
     session.unresolvedConflicts,
+    session.baselineProfile,
   );
   const intakeStatus: IntakeStatus = nextQuestion ? "awaiting_clarification" : "ready_for_confirmation";
   const nextSequence = session.conversationTurns.length + 1;
@@ -195,6 +375,7 @@ export function requestAnotherConversationQuestion(session: ConversationIntakeSe
       session.skippedQuestionIds,
       session.unresolvedUncertainties,
       session.unresolvedConflicts,
+      session.baselineProfile,
     ) ||
     fallbackQuestion(session);
 
@@ -218,11 +399,27 @@ export function getLatestAdvisorTurn(session: ConversationIntakeSession) {
 
 function fallbackQuestion(session: ConversationIntakeSession): IntakeQuestion | null {
   const updates = session.accumulatedInterpretation.suggestedProfileUpdates;
-  if (!updates.maxPurchaseBudget && !session.answeredQuestionIds.includes("budget_max")) {
+  const policies = mergeDecisionParticipationPolicyMaps(
+    session.baselineProfile?.decisionPolicies,
+    session.accumulatedInterpretation.decisionPolicies,
+  );
+  const effectivePurchaseBudget = updates.maxPurchaseBudget ?? session.baselineProfile?.maxPurchaseBudget;
+  if (
+    !effectivePurchaseBudget
+    && policyAllowsClarification(policies, "purchaseBudget")
+    && !session.answeredQuestionIds.includes("budget_max")
+  ) {
     return {
       id: "budget_max",
       text: "What is the maximum purchase budget you want me to work within?",
       reason: "Budget strongly affects responsible recommendations.",
+    };
+  }
+  if (!session.answeredQuestionIds.includes("daily_use") && !hasPositiveDecisionCriterion(updates)) {
+    return {
+      id: "daily_use",
+      text: "What should matter most in the recommendation: reliability, safety, daily use, or the kind of vehicle?",
+      reason: "A disabled preference does not provide a positive basis for a recommendation.",
     };
   }
   if (!session.answeredQuestionIds.includes("daily_use")) {
@@ -244,12 +441,28 @@ export function getConciseUnderstanding(session: ConversationIntakeSession) {
   };
 }
 
+export function prepareConversationRevisionSession(
+  session: ConversationIntakeSession,
+  baselineProfile: BuyerProfile,
+): ConversationIntakeSession {
+  return {
+    ...session,
+    baselineProfile,
+    currentQuestion: null,
+    answeredQuestionIds: [],
+    skippedQuestionIds: [],
+    intakeStatus: "awaiting_initial_message",
+  };
+}
+
 function interpretClarificationAnswer(session: ConversationIntakeSession, answer: string): ClarificationAnswerResult {
   switch (session.currentQuestion?.id) {
     case "performance_meaning":
       return interpretPerformanceAnswer(answer);
     case "make_flexibility":
       return interpretMakeFlexibilityAnswer(session, answer);
+    case "relationship_intent":
+      return interpretRelationshipIntentAnswer(session, answer);
     case "budget_max":
       return interpretBudgetAnswer(answer);
     case "winter_traction":
@@ -276,6 +489,74 @@ function interpretClarificationAnswer(session: ConversationIntakeSession, answer
         evidencePhrase: answer,
       };
   }
+}
+
+function clarificationResultFromSemanticInterpretation(
+  interpretation: PreferenceInterpretation,
+  answer: string,
+): ClarificationAnswerResult {
+  return {
+    profileUpdates: interpretation.suggestedProfileUpdates,
+    explicitFacts: interpretation.explicitFacts,
+    inferredPreferences: interpretation.inferredPreferences,
+    confidenceByField: interpretation.confidenceByField,
+    resolvedUncertaintyTopics: interpretation.confidenceByField.map((field) => topicForField(field.field)),
+    resolvedConflictTopics: interpretation.conflicts.length ? [] : ["Understanding unavailable"],
+    newUncertainties: interpretation.uncertainties,
+    newConflicts: interpretation.conflicts,
+    acknowledgement: interpretation.interpretationSummary || "That helps. I'll keep that with the rest of what you've told me.",
+    evidencePhrase: answer,
+    canonicalMappings: interpretation.canonicalMappings,
+  };
+}
+
+function emptyClarificationAnswerResult(answer: string): ClarificationAnswerResult {
+  return {
+    profileUpdates: {},
+    explicitFacts: [],
+    inferredPreferences: [],
+    confidenceByField: [],
+    resolvedUncertaintyTopics: [],
+    resolvedConflictTopics: [],
+    newUncertainties: [],
+    newConflicts: [],
+    acknowledgement: "",
+    evidencePhrase: answer,
+    canonicalMappings: [],
+  };
+}
+
+function mergeClarificationAnswerResults(
+  primary: ClarificationAnswerResult,
+  semantic: ClarificationAnswerResult,
+): ClarificationAnswerResult {
+  return {
+    profileUpdates: mergeProfileUpdates(primary.profileUpdates, semantic.profileUpdates),
+    explicitFacts: mergeFacts(primary.explicitFacts, semantic.explicitFacts),
+    inferredPreferences: mergeInferredPreferences(primary.inferredPreferences, semantic.inferredPreferences, semantic.explicitFacts),
+    confidenceByField: mergeConfidence(primary.confidenceByField, semantic.confidenceByField),
+    resolvedUncertaintyTopics: Array.from(new Set([...primary.resolvedUncertaintyTopics, ...semantic.resolvedUncertaintyTopics])),
+    resolvedConflictTopics: Array.from(new Set([...primary.resolvedConflictTopics, ...semantic.resolvedConflictTopics])),
+    newUncertainties: mergeUncertainties(primary.newUncertainties, [], semantic.newUncertainties),
+    newConflicts: mergeConflicts(primary.newConflicts, [], semantic.newConflicts),
+    acknowledgement: semantic.inferredPreferences.length > primary.inferredPreferences.length
+      ? semantic.acknowledgement
+      : primary.acknowledgement || semantic.acknowledgement,
+    evidencePhrase: `${primary.evidencePhrase}\n${semantic.evidencePhrase}`.trim(),
+    canonicalMappings: mergeCanonicalConcepts(primary.canonicalMappings, semantic.canonicalMappings),
+  };
+}
+
+function topicForField(field: keyof BuyerProfilePatch) {
+  const topics: Partial<Record<keyof BuyerProfilePatch, string>> = {
+    performanceImportance: "Meaning of powerful",
+    maxPurchaseBudget: "Maximum budget",
+    drivetrainPreference: "Winter traction",
+    familySize: "Family seating",
+    preferredMake: "Vehicle reference meaning",
+    requiredMake: "Vehicle reference meaning",
+  };
+  return topics[field] || String(field);
 }
 
 function interpretPerformanceAnswer(answer: string): ClarificationAnswerResult {
@@ -338,7 +619,14 @@ function interpretPerformanceAnswer(answer: string): ClarificationAnswerResult {
 
 function interpretMakeFlexibilityAnswer(session: ConversationIntakeSession, answer: string): ClarificationAnswerResult {
   const lower = answer.toLowerCase();
-  const make = String(session.accumulatedInterpretation.suggestedProfileUpdates.preferredMake || "BMW");
+  const priorMapping = session.accumulatedInterpretation.canonicalMappings
+    ?.find((item) => item.conceptType === "vehicle_make" && item.intent !== "excluded");
+  const make = String(
+    session.accumulatedInterpretation.suggestedProfileUpdates.preferredMake
+    || session.accumulatedInterpretation.suggestedProfileUpdates.requiredMake
+    || priorMapping?.value
+    || "the requested make",
+  );
   const flexible = /not required|isn.?t required|is not required|flexible|not non[-\s]?negotiable|badge isn|badge is not|no[, ]/i.test(answer);
   const required = /required|non[-\s]?negotiable|only|must|has to be/i.test(answer) && !flexible;
   const style = /style|look|looks|design|premium|expensive|cool/i.test(answer);
@@ -351,23 +639,37 @@ function interpretMakeFlexibilityAnswer(session: ConversationIntakeSession, answ
   if (required) {
     profileUpdates.requiredMake = make;
     profileUpdates.preferredMake = undefined;
-    explicitFacts.push({ label: "Required make", value: make, evidencePhrase: answer, field: "requiredMake" });
+    explicitFacts.push({
+      label: "Required make",
+      value: make,
+      evidencePhrase: answer,
+      field: "requiredMake",
+      canonicalIntent: "required",
+    });
     confidenceByField.push({
       field: "requiredMake",
       value: make,
       confidence: "high",
       evidencePhrase: answer,
       requiresConfirmation: false,
+      canonicalIntent: "required",
     });
   } else {
     profileUpdates.preferredMake = make;
-    explicitFacts.push({ label: "Preferred make", value: make, evidencePhrase: answer, field: "preferredMake" });
+    explicitFacts.push({
+      label: "Preferred make",
+      value: make,
+      evidencePhrase: answer,
+      field: "preferredMake",
+      canonicalIntent: "preferred",
+    });
     confidenceByField.push({
       field: "preferredMake",
       value: make,
       confidence: "high",
       evidencePhrase: answer,
       requiresConfirmation: false,
+      canonicalIntent: "preferred",
     });
   }
 
@@ -415,10 +717,150 @@ function interpretMakeFlexibilityAnswer(session: ConversationIntakeSession, answ
         ]
       : [],
     acknowledgement: flexible
-      ? "That helps. It sounds like the BMW badge is flexible, but the style and driving feel still matter."
-      : "Understood. I'll treat the BMW badge as a firm requirement, while keeping the repair-cost concern visible.",
+      ? `That helps. It sounds like the ${make} badge is flexible, but the style and driving feel still matter.`
+      : `Understood. I'll treat the ${make} badge as a firm requirement, while keeping the repair-cost concern visible.`,
     evidencePhrase: answer,
+    canonicalMappings: priorMapping
+      ? [{
+          ...priorMapping,
+          id: `${priorMapping.id}:confirmed`,
+          intent: required ? "required" : "preferred",
+          decisionConcept: required ? "hard_constraint" : "preference",
+          destination: required ? "requiredMake" : "preferredMake",
+          supportStatus: "supported_and_used",
+          confirmationStatus: "confirmed",
+          requiresConfirmation: false,
+          source: "user_correction",
+          sourceText: answer,
+        }]
+      : undefined,
   };
+}
+
+function interpretRelationshipIntentAnswer(
+  session: ConversationIntakeSession,
+  answer: string,
+): ClarificationAnswerResult {
+  const lower = answer.toLowerCase();
+  const intent =
+    /\b(?:no|exclude|avoid|don't want|do not want)\b/i.test(lower)
+      ? "excluded"
+      : /\b(?:required|must|only|need|non[-\s]?negotiable)\b/i.test(lower)
+        ? "required"
+        : /\b(?:prefer|preferred|first choice)\b/i.test(lower)
+          ? "preferred"
+          : /\b(?:acceptable|okay|ok|fine|allowed|either|both|flexible)\b/i.test(lower)
+            ? "allowed"
+            : undefined;
+  const uncertainMappings = session.accumulatedInterpretation.canonicalMappings
+    ?.filter(
+      (item) =>
+        item.intent === "uncertain"
+        && ["body_style", "vehicle_category", "fuel_type", "drivetrain", "transmission"]
+          .includes(item.conceptType),
+    ) || [];
+
+  if (!intent || !uncertainMappings.length) {
+    return {
+      profileUpdates: {},
+      explicitFacts: [],
+      inferredPreferences: [],
+      confidenceByField: [],
+      resolvedUncertaintyTopics: [],
+      resolvedConflictTopics: [],
+      newUncertainties: [{
+        topic: "Preference strength",
+        evidencePhrase: answer,
+        question: "Should I treat those options as required, preferred, or simply acceptable?",
+      }],
+      newConflicts: [],
+      acknowledgement: "I still need to understand how strongly you want those options.",
+      evidencePhrase: answer,
+    };
+  }
+
+  const canonicalMappings: CanonicalMappedConcept[] = uncertainMappings.map((item) => ({
+    ...item,
+    id: `${item.id}:confirmed`,
+    intent,
+    decisionConcept: intent === "required"
+      ? "hard_constraint" as const
+      : intent === "preferred"
+        ? "preference" as const
+        : intent === "allowed"
+          ? "allowed_fallback" as const
+          : "exclusion" as const,
+    destination: relationshipDestination(item.conceptType, intent),
+    supportStatus: "supported_and_used" as const,
+    confirmationStatus: "confirmed" as const,
+    requiresConfirmation: false,
+    source: "user_correction" as const,
+    sourceText: answer,
+  }));
+  const values = canonicalMappings.flatMap((item) =>
+    Array.isArray(item.value) ? item.value.map(String) : [String(item.value)]
+  );
+
+  return {
+    profileUpdates: buildProfilePatch(canonicalMappings),
+    explicitFacts: [],
+    inferredPreferences: [],
+    confidenceByField: [],
+    resolvedUncertaintyTopics: session.unresolvedUncertainties
+      .filter((uncertainty) =>
+        values.some((value) =>
+          `${uncertainty.topic} ${uncertainty.evidencePhrase}`.toLowerCase()
+            .includes(value.toLowerCase())
+        )
+      )
+      .map((uncertainty) => uncertainty.topic),
+    resolvedConflictTopics: [],
+    newUncertainties: [],
+    newConflicts: [],
+    acknowledgement: `Understood. I'll treat ${formatList(values)} as ${intent === "allowed" ? "acceptable options" : intent}.`,
+    evidencePhrase: answer,
+    canonicalMappings,
+  };
+}
+
+function relationshipDestination(
+  conceptType: CanonicalMappedConcept["conceptType"],
+  intent: "required" | "preferred" | "allowed" | "excluded",
+): CanonicalMappedConcept["destination"] {
+  const destinations = {
+    body_style: {
+      required: "requiredBodyStyles",
+      preferred: "preferredBodyStyles",
+      allowed: "allowedBodyStyles",
+      excluded: "excludedBodyStyles",
+    },
+    vehicle_category: {
+      required: "requiredVehicleCategories",
+      preferred: "preferredVehicleCategories",
+      allowed: "allowedVehicleCategories",
+      excluded: "excludedVehicleCategories",
+    },
+    fuel_type: {
+      required: "requiredFuelTypes",
+      preferred: "preferredFuelTypes",
+      allowed: "allowedFuelTypes",
+      excluded: "excludedFuelTypes",
+    },
+    drivetrain: {
+      required: "requiredDrivetrains",
+      preferred: "preferredDrivetrains",
+      allowed: "allowedDrivetrains",
+      excluded: "excludedDrivetrains",
+    },
+    transmission: {
+      required: "requiredTransmissions",
+      preferred: "preferredTransmissions",
+      allowed: "allowedTransmissions",
+      excluded: "excludedTransmissions",
+    },
+  } as const;
+  if (!(conceptType in destinations)) return undefined;
+  return destinations[conceptType as keyof typeof destinations][intent];
 }
 
 function interpretBudgetAnswer(answer: string): ClarificationAnswerResult {
@@ -489,6 +931,7 @@ function interpretWinterAnswer(answer: string): ClarificationAnswerResult {
       value,
       evidencePhrase: answer,
       field: "drivetrainPreference",
+      canonicalIntent: required ? "required" : "preferred",
     });
     confidenceByField.push({
       field: "drivetrainPreference",
@@ -496,6 +939,7 @@ function interpretWinterAnswer(answer: string): ClarificationAnswerResult {
       confidence: required ? "high" : "medium",
       evidencePhrase: answer,
       requiresConfirmation: !required,
+      canonicalIntent: required ? "required" : "preferred",
     });
   }
 
@@ -643,7 +1087,12 @@ function mergePreferenceInterpretation(
   interpretation: PreferenceInterpretation,
   result: ClarificationAnswerResult,
 ): PreferenceInterpretation {
-  const suggestedProfileUpdates = mergeProfileUpdates(interpretation.suggestedProfileUpdates, result.profileUpdates);
+  const canonicalMappings = mergeCanonicalConcepts(interpretation.canonicalMappings, result.canonicalMappings);
+  const suggestedProfileUpdates = mergeCanonicalProfileUpdates(
+    mergeProfileUpdates(interpretation.suggestedProfileUpdates, result.profileUpdates),
+    canonicalMappings,
+    result.canonicalMappings,
+  );
   const explicitFacts = mergeFacts(interpretation.explicitFacts, result.explicitFacts);
   const inferredPreferences = mergeInferredPreferences(interpretation.inferredPreferences, result.inferredPreferences, result.explicitFacts);
   const confidenceByField = mergeConfidence(interpretation.confidenceByField, result.confidenceByField);
@@ -661,6 +1110,11 @@ function mergePreferenceInterpretation(
     confidenceByField,
     suggestedProfileUpdates,
     nextClarifyingQuestion: "",
+    canonicalMappings,
+    decisionPolicies: mergeDecisionParticipationPolicyMaps(
+      interpretation.decisionPolicies,
+      result.profileUpdates.decisionPolicies,
+    ),
   };
 }
 
@@ -670,24 +1124,69 @@ function selectNextQuestion(
   skippedQuestionIds: IntakeQuestionCode[],
   unresolvedUncertainties = interpretation.uncertainties,
   unresolvedConflicts = interpretation.conflicts,
+  baselineProfile?: BuyerProfile,
 ): IntakeQuestion | null {
   const unavailable = new Set([...answeredQuestionIds, ...skippedQuestionIds]);
   if (answeredQuestionIds.length + skippedQuestionIds.length >= maxClarifyingQuestions) return null;
 
   const updates = interpretation.suggestedProfileUpdates;
+  if (
+    interpretation.canonicalMappings?.some((item) => item.supportStatus === "recognized_out_of_scope")
+    || interpretation.explicitFacts.some((item) => item.label === "Outside current scope")
+  ) {
+    return null;
+  }
+  if (assessCatalogIntentFeasibility(updates, vehicleCatalog).terminalNoMatch) return null;
   const raw = interpretation.rawUserMessage.toLowerCase();
+  const policies = mergeDecisionParticipationPolicyMaps(
+    baselineProfile?.decisionPolicies,
+    interpretation.decisionPolicies,
+  );
+  const effectivePurchaseBudget = updates.maxPurchaseBudget ?? baselineProfile?.maxPurchaseBudget;
+  const uncertainMake = interpretation.canonicalMappings
+    ?.find((item) => item.conceptType === "vehicle_make" && item.intent === "uncertain");
+  const uncertainRelationship = interpretation.canonicalMappings
+    ?.filter(
+      (item) =>
+        item.intent === "uncertain"
+        && ["body_style", "vehicle_category", "fuel_type", "drivetrain", "transmission"]
+          .includes(item.conceptType),
+    );
   const candidates: IntakeQuestion[] = [];
 
   if (
     !unavailable.has("make_flexibility") &&
-    (updates.preferredMake || /\bbmw\b/.test(raw)) &&
-    (unresolvedConflicts.some((conflict) => /repair|premium|brand|luxury/i.test(conflict.topic + conflict.description)) ||
-      /repair|maintenance/i.test(raw))
+    (
+      Boolean(uncertainMake)
+      || (
+        (updates.preferredMake || /\bbmw\b/.test(raw))
+        && (
+          unresolvedConflicts.some((conflict) => /repair|premium|brand|luxury/i.test(conflict.topic + conflict.description))
+          || /repair|maintenance/i.test(raw)
+        )
+      )
+    )
   ) {
     candidates.push({
       id: "make_flexibility",
-      text: `Is ${updates.preferredMake || "that brand"} flexible, or should I treat it as non-negotiable?`,
+      text: `Is ${updates.preferredMake || uncertainMake?.value || "that brand"} flexible, or should I treat it as non-negotiable?`,
       reason: "Brand flexibility can materially change qualification.",
+    });
+  }
+
+  if (
+    !unavailable.has("relationship_intent")
+    && uncertainRelationship?.length
+  ) {
+    const values = Array.from(
+      new Set(uncertainRelationship.flatMap((item) =>
+        Array.isArray(item.value) ? item.value.map(String) : [String(item.value)]
+      )),
+    );
+    candidates.push({
+      id: "relationship_intent",
+      text: `Should I treat ${formatList(values)} as required, preferred, or simply acceptable options?`,
+      reason: "The relationship strength changes qualification and ranking.",
     });
   }
 
@@ -701,7 +1200,7 @@ function selectNextQuestion(
 
   if (
     !unavailable.has("winter_traction") &&
-    (updates.climate === "snow" || /\bwinter|snow|ice\b/.test(raw)) &&
+    /\b(?:winter|snow|ice)\b/.test(raw) &&
     !updates.drivetrainPreference
   ) {
     candidates.push({
@@ -711,11 +1210,26 @@ function selectNextQuestion(
     });
   }
 
-  if (!unavailable.has("budget_max") && !updates.maxPurchaseBudget) {
+  if (
+    !unavailable.has("budget_max")
+    && !effectivePurchaseBudget
+    && policyAllowsClarification(policies, "purchaseBudget")
+  ) {
     candidates.push({
       id: "budget_max",
       text: "What is the maximum purchase budget you want me to work within?",
       reason: "Budget strongly affects responsible recommendations.",
+    });
+  }
+
+  if (
+    !unavailable.has("ownership_tradeoff")
+    && policies?.totalOwnershipBudget?.participation === "unresolved"
+  ) {
+    candidates.push({
+      id: "ownership_tradeoff",
+      text: "Should ongoing costs like insurance, fuel, and repairs still influence the recommendation?",
+      reason: "The user removed a purchase-price limit but did not say whether ownership costs still matter.",
     });
   }
 
@@ -739,7 +1253,19 @@ function selectNextQuestion(
     });
   }
 
-  if (!unavailable.has("daily_use") && updates.maxPurchaseBudget && !/commute|school|family|work|daily|snow|winter/.test(raw)) {
+  if (
+    !unavailable.has("daily_use")
+    && policies?.purchaseBudget?.participation === "disabled"
+    && !hasPositiveDecisionCriterion(updates)
+  ) {
+    candidates.push({
+      id: "daily_use",
+      text: "What should matter most in the recommendation: reliability, safety, daily use, or the kind of vehicle?",
+      reason: "A disabled budget does not provide a positive basis for a recommendation.",
+    });
+  }
+
+  if (!unavailable.has("daily_use") && effectivePurchaseBudget && !/commute|school|family|work|daily|snow|winter/.test(raw)) {
     candidates.push({
       id: "daily_use",
       text: "Will this car mostly be used for commuting, school, family driving, or bad weather?",
@@ -747,7 +1273,12 @@ function selectNextQuestion(
     });
   }
 
-  if (!unavailable.has("new_used") && !updates.purchaseCondition && updates.maxPurchaseBudget && Number(updates.maxPurchaseBudget) < 20000) {
+  if (
+    !unavailable.has("new_used")
+    && !updates.purchaseCondition
+    && effectivePurchaseBudget
+    && Number(effectivePurchaseBudget) < 20000
+  ) {
     candidates.push({
       id: "new_used",
       text: "Are you open to used cars, or do you only want new?",
@@ -755,7 +1286,24 @@ function selectNextQuestion(
     });
   }
 
-  return candidates[0] || null;
+  return candidates.sort(
+    (left, right) => clarificationPriority(right.id) - clarificationPriority(left.id),
+  )[0] || null;
+}
+
+function clarificationPriority(question: IntakeQuestionCode) {
+  const priorities: Partial<Record<IntakeQuestionCode, number>> = {
+    make_flexibility: 100,
+    relationship_intent: 98,
+    winter_traction: 95,
+    performance_meaning: 90,
+    family_seating: 88,
+    budget_max: 85,
+    ownership_tradeoff: 80,
+    daily_use: 60,
+    new_used: 50,
+  };
+  return priorities[question] || 0;
 }
 
 function createTurn(
@@ -778,10 +1326,39 @@ function createTurn(
 function mergeProfileUpdates(current: BuyerProfilePatch, updates: BuyerProfilePatch) {
   const next: BuyerProfilePatch = { ...current };
   for (const [key, value] of Object.entries(updates) as Array<[keyof BuyerProfilePatch, BuyerProfilePatch[keyof BuyerProfilePatch]]>) {
-    if (value === undefined) delete next[key];
+    if (key === "decisionPolicies") {
+      next.decisionPolicies = mergeDecisionParticipationPolicyMaps(
+        next.decisionPolicies,
+        value as BuyerProfilePatch["decisionPolicies"],
+      );
+    } else if (value === undefined) delete next[key];
     else (next as Record<string, unknown>)[key] = value;
   }
   return next;
+}
+
+function mergeCanonicalProfileUpdates(
+  current: BuyerProfilePatch,
+  canonicalMappings: CanonicalMappedConcept[],
+  latestMappings: CanonicalMappedConcept[] = [],
+) {
+  const next: BuyerProfilePatch = { ...current };
+  const latestConcepts = new Set(latestMappings.map((item) => item.conceptType));
+  if (latestConcepts.has("vehicle_make")) {
+    delete next.requiredMake;
+    delete next.preferredMake;
+    delete next.allowedMakes;
+    delete next.excludedMakes;
+  }
+  if (latestConcepts.has("body_style") || latestConcepts.has("vehicle_category")) {
+    delete next.bodyStyle;
+    next.flexibleConstraints = next.flexibleConstraints?.filter((item) => item !== "bodyStyle");
+  }
+  if (latestConcepts.has("fuel_type")) delete next.requiredFuelType;
+  if (latestConcepts.has("drivetrain")) delete next.drivetrainPreference;
+  if (latestConcepts.has("transmission")) delete next.transmissionPreference;
+
+  return mergeProfileUpdates(next, buildProfilePatch(canonicalMappings) as BuyerProfilePatch);
 }
 
 function mergeFacts(current: PreferenceFact[], updates: PreferenceFact[]) {
@@ -866,6 +1443,24 @@ function calculateInterpretationConfidence(
 function downgradeConfidence(confidence: InterpretationConfidence): InterpretationConfidence {
   if (confidence === "high") return "medium";
   return "low";
+}
+
+function hasPositiveDecisionCriterion(updates: BuyerProfilePatch) {
+  if (Object.values(updates.decisionPolicies || {}).some(
+    (policy) =>
+      policy
+      && policyIsPositiveCriterion(policy)
+      && !["purchaseBudget", "monthlyPayment", "totalOwnershipBudget"].includes(policy.dimension),
+  )) {
+    return true;
+  }
+  return Object.entries(updates).some(([key, value]) => {
+    if (key === "decisionPolicies" || value === undefined || value === "" || value === "any" || value === "not-sure") {
+      return false;
+    }
+    if (Array.isArray(value)) return value.length > 0;
+    return true;
+  });
 }
 
 function buildMergedSummary(

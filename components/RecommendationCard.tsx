@@ -81,7 +81,7 @@ export function RecommendationCard({
         </div>
 
         <div>
-          <h4 className="mb-2 text-xs font-black uppercase tracking-[0.1em] text-slate-400">Why it matches</h4>
+          <h4 className="mb-2 text-xs font-black uppercase tracking-[0.1em] text-slate-400">Match reasons</h4>
           <ul className="space-y-1.5 pl-4 text-sm font-medium leading-5 text-slate-300">
             {mainReasons.map((reason, index) => (
               <li className="list-disc" key={`${reason}-${index}`}>

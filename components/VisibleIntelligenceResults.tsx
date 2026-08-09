@@ -1,7 +1,12 @@
-import { type ReactNode, useMemo, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { formatMoney, formatNumber } from "@/lib/affordability";
-import { buildHumanAdvisorNarrative } from "@/lib/advisorConversation";
+import {
+  buildAdvisorCommunicationViewModel,
+  type AdvisorPolicySummary,
+  type AdvisorTechnicalDetail,
+} from "@/lib/advisorCommunication";
 import { scoreWeightLabels } from "@/lib/recommendations";
+import { getVehiclePhotoState } from "@/lib/vehiclePhoto";
 import type { BuyerProfile } from "@/types/buyer";
 import type {
   CandidatePipelineDebug,
@@ -15,6 +20,7 @@ import type {
   RecommendationSignal,
   RecommendationTradeoff,
   ScoredVehicle,
+  Vehicle,
 } from "@/types/vehicle";
 
 type VisibleIntelligenceResultsProps = {
@@ -35,162 +41,96 @@ export function VisibleIntelligenceResults({
   onToggleCompare,
 }: VisibleIntelligenceResultsProps) {
   const [showChangeFactors, setShowChangeFactors] = useState(false);
-  const topVehicle = rankedVehicles[0];
-  const recommendation = topVehicle?.recommendation || decisionSet.primaryRecommendations[0];
-  const runnerUpLoss = decisionSet.pipelineDebug.runnerUpLossReasons[0]?.primaryReason || decisionReport.whyRunnerUpLost;
-
-  const advisorText = useMemo(() => {
-    if (!recommendation || !topVehicle) return { headline: "", reason: "" };
-    return getAdvisorText(recommendation, topVehicle);
-  }, [recommendation, topVehicle]);
-  const narrative = useMemo(
-    () => buildHumanAdvisorNarrative({ decisionSet, decisionReport, profile }),
+  const recommendation = decisionSet.primaryRecommendations[0];
+  const topVehicle = recommendation?.vehicle;
+  const communication = useMemo(
+    () => buildAdvisorCommunicationViewModel({ decisionSet, decisionReport, profile }),
     [decisionReport, decisionSet, profile],
   );
 
   if (!topVehicle || !recommendation) return null;
 
   const monthlyHeadroom = profile.monthlyBudget - recommendation.ownershipSummary.estimatedMonthlyTotal;
-  const biggestTradeoff = getBiggestTradeoff(recommendation);
-  const primaryReasons = getPrimaryReasons(recommendation);
-  const conversationalReasons = getConversationalReasons(narrative.strongestReasons, primaryReasons);
-  const verificationNote = getVerificationNote(recommendation);
-  const needsDataDisclosure = recommendation.dataQualityConfidence.level !== "high";
-  const missingInformation = recommendation.missingInformation.map(
-    (item) => `${formatFieldLabel(item.field)} from ${item.expectedSource} (${item.impact} impact)`,
-  );
-  const estimatedFields = recommendation.estimatedFields.map(
-    (item) => `${formatFieldLabel(item.field)}: ${formatEstimateValue(item.value, item.unit)} by ${item.method}`,
-  );
+  const vehicleName = `${topVehicle.year} ${topVehicle.make} ${topVehicle.model}`;
 
   return (
     <div className="grid gap-4">
-      <section className="overflow-hidden rounded-lg border border-white/10 bg-white/[0.06] shadow-[0_28px_80px_rgba(0,0,0,0.28)] backdrop-blur">
-        <div className="grid gap-6 p-5 md:p-7 lg:grid-cols-[minmax(0,1.12fr)_minmax(240px,0.88fr)] lg:items-start">
-          <div className="grid gap-5">
-            <div className="max-w-4xl">
-              <h2 className="text-3xl font-black leading-tight tracking-tight text-white md:text-5xl">
-                Based on everything you’ve told me, I’d start by looking at the {topVehicle.year} {topVehicle.make} {topVehicle.model}.
-              </h2>
-              <div className="mt-5 grid gap-3 text-base font-semibold leading-7 text-slate-200 md:text-lg">
-                <p>{narrative.buyerContextAcknowledgment}</p>
-                <p>{narrative.advisorOpinion}</p>
-              </div>
-            </div>
-
-            <div className="grid gap-5 lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]">
-              <div>
-                <p className="text-xs font-black uppercase tracking-[0.12em] text-cyan-200">Why I chose it</p>
-                <ol className="mt-3 grid gap-3">
-                  {conversationalReasons.map((reason, index) => (
-                    <li className="flex gap-3 text-sm font-bold leading-6 text-slate-100 md:text-base" key={reason}>
-                      <span className="mt-0.5 grid h-6 w-6 shrink-0 place-items-center rounded-full bg-cyan-300 text-xs font-black text-slate-950">
-                        {index + 1}
-                      </span>
-                      <span>{reason}</span>
-                    </li>
-                  ))}
-                </ol>
-              </div>
-
-              <div className="grid gap-4">
-                <div className="rounded-lg border border-amber-200/30 bg-amber-200/[0.1] p-4">
-                  <p className="text-xs font-black uppercase tracking-[0.12em] text-amber-100">The biggest tradeoff</p>
-                  <p className="mt-2 text-sm font-bold leading-6 text-amber-50 md:text-base">{biggestTradeoff}</p>
-                </div>
-                <div className="rounded-lg border border-white/10 bg-slate-950/35 p-4">
-                  <p className="text-xs font-black uppercase tracking-[0.12em] text-slate-300">One thing I’d verify before buying</p>
-                  <p className="mt-2 text-sm font-semibold leading-6 text-slate-300">{verificationNote}</p>
-                </div>
-              </div>
-            </div>
-
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-              <button
-                className="min-h-11 rounded-lg border border-cyan-300/40 bg-cyan-300 px-4 text-sm font-black text-slate-950 transition hover:bg-cyan-200"
-                onClick={() => setShowChangeFactors((current) => !current)}
-                type="button"
-              >
-                What would change this recommendation?
-              </button>
-              <button
-                className={`min-h-11 rounded-lg border px-4 text-sm font-black transition ${
-                  compareIds.includes(topVehicle.id)
-                    ? "border-cyan-300 bg-cyan-300/20 text-cyan-100"
-                    : "border-white/10 bg-white/[0.03] text-slate-300 hover:border-cyan-300/50 hover:bg-cyan-300/10"
-                }`}
-                onClick={() => onToggleCompare(topVehicle.id)}
-                type="button"
-              >
-                {compareIds.includes(topVehicle.id) ? "Added to compare" : "Compare"}
-              </button>
-            </div>
-
-            {showChangeFactors ? <ChangeFactors items={decisionReport.whatCouldChangeRecommendation} /> : null}
+      <section className="overflow-hidden rounded-lg border border-white/10 bg-white/[0.055] shadow-[0_30px_90px_rgba(0,0,0,0.3)] backdrop-blur">
+        <div className="grid gap-6 p-5 md:p-7">
+          <div className="max-w-3xl">
+            <p className="text-xs font-black uppercase tracking-[0.16em] text-cyan-200">Advisor</p>
+            <p className="mt-2 text-xl font-black leading-8 text-white md:text-3xl">
+              {communication.advisorHeadline}
+            </p>
+            <p className="mt-3 text-base font-semibold leading-7 text-slate-300">
+              {communication.recommendationSummary}
+            </p>
           </div>
 
-          <aside className="grid gap-3">
-            <VehicleImage vehicle={topVehicle} compact />
-            <div className="rounded-lg border border-white/10 bg-slate-950/35 p-4">
-              <p className="text-xs font-black uppercase tracking-[0.12em] text-cyan-200">My recommendation</p>
-              <h3 className="mt-2 text-2xl font-black leading-tight text-white">
-                {topVehicle.year} {topVehicle.make} {topVehicle.model}
-              </h3>
-              <p className="mt-2 text-sm font-semibold leading-6 text-slate-300">{advisorText.reason}</p>
+          <div className="grid gap-5 lg:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)] lg:items-start">
+            <article className="overflow-hidden rounded-lg border border-cyan-200/15 bg-slate-950/45">
+              <VehicleImage vehicle={topVehicle} />
+              <div className="grid gap-3 p-4 md:p-5">
+                <p className="text-xs font-black uppercase tracking-[0.16em] text-cyan-200">Recommended vehicle</p>
+                <h2 className="text-3xl font-black leading-tight tracking-tight text-white md:text-5xl">{vehicleName}</h2>
+              </div>
+            </article>
+
+            <div className="grid gap-4">
+              <section className="rounded-lg border border-white/10 bg-slate-950/35 p-4 md:p-5">
+                <p className="text-xs font-black uppercase tracking-[0.14em] text-cyan-200">Recommendation</p>
+                <div className="mt-5">
+                  <h3 className="text-sm font-black text-white">Why I recommend it</h3>
+                  <ol className="mt-3 grid gap-3">
+                    {communication.reasons.map((reason, index) => (
+                      <li className="flex gap-3 text-sm font-bold leading-6 text-slate-200" key={reason}>
+                        <span className="mt-0.5 grid h-6 w-6 shrink-0 place-items-center rounded-full bg-cyan-300 text-xs font-black text-slate-950">
+                          {index + 1}
+                        </span>
+                        <span>{reason}</span>
+                      </li>
+                    ))}
+                  </ol>
+                </div>
+              </section>
+
+              <section className="rounded-lg border border-amber-200/20 bg-amber-200/[0.08] p-4 md:p-5">
+                <p className="text-xs font-black uppercase tracking-[0.14em] text-amber-100">Before Buying</p>
+                <h3 className="mt-2 text-sm font-black text-amber-50">What I’d verify</h3>
+                <p className="mt-2 text-sm font-bold leading-6 text-amber-50">{communication.mainTradeoff}</p>
+                <p className="mt-2 text-sm font-semibold leading-6 text-amber-50/80">{communication.verification}</p>
+              </section>
+
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                <button
+                  className="min-h-11 rounded-lg border border-cyan-300/40 bg-cyan-300 px-4 text-sm font-black text-slate-950 transition hover:bg-cyan-200"
+                  onClick={() => setShowChangeFactors((current) => !current)}
+                  type="button"
+                >
+                  Change factors
+                </button>
+                <button
+                  className={`min-h-11 rounded-lg border px-4 text-sm font-black transition ${
+                    compareIds.includes(topVehicle.id)
+                      ? "border-cyan-300 bg-cyan-300/20 text-cyan-100"
+                      : "border-white/10 bg-white/[0.03] text-slate-300 hover:border-cyan-300/50 hover:bg-cyan-300/10"
+                  }`}
+                  onClick={() => onToggleCompare(topVehicle.id)}
+                  type="button"
+                >
+                  {compareIds.includes(topVehicle.id) ? "Added to compare" : "Compare"}
+                </button>
+              </div>
+
+              {showChangeFactors ? <ChangeFactors items={decisionReport.whatCouldChangeRecommendation} /> : null}
             </div>
-          </aside>
+          </div>
         </div>
       </section>
 
-      <DisclosureSection eyebrow="Cars I seriously considered" title="What did you compare before choosing?">
-        <div className="grid gap-5">
-          <PipelineStrip debug={decisionSet.pipelineDebug} />
-          <div>
-            <SectionHeader eyebrow="What if I care about something else?" title="Which car wins from another angle?" />
-            <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-              <PerspectiveCard title="What’s the best overall fit?" choice={decisionReport.bestOverall} recommendation={findRecommendation(decisionSet, decisionReport.bestOverall)} />
-              <PerspectiveCard title="What’s the best value?" choice={decisionReport.bestValue} recommendation={findRecommendation(decisionSet, decisionReport.bestValue)} />
-              <PerspectiveCard title="What’s the safest pick?" choice={decisionReport.safestChoice} recommendation={findRecommendation(decisionSet, decisionReport.safestChoice)} />
-              <PerspectiveCard title="What best matches my preferences?" choice={decisionReport.userPreferredChoice} recommendation={findRecommendation(decisionSet, decisionReport.userPreferredChoice)} />
-            </div>
-          </div>
-        </div>
-      </DisclosureSection>
-
-      <SuggestedFollowUps prompt={narrative.curiosityPrompt} suggestions={narrative.suggestedActions} />
-
-      <DisclosureSection eyebrow="Why did you choose this?" title="What made you choose it?">
-        <NoteList title="What weighed in its favor?" items={formatSignals(recommendation.reasonsForRecommendation)} />
-      </DisclosureSection>
-
-      <DisclosureSection eyebrow="Which car came closest?" title="Why didn’t the runner-up win?">
-        <NoteList title="Which car almost won?" items={formatRunnerUp(decisionReport.runnerUp, decisionReport.whyRunnerUpLost, runnerUpLoss)} />
-      </DisclosureSection>
-
-      <DisclosureSection eyebrow="How confident are you?" title="How much should I trust this?">
-        <div className="grid gap-3 rounded-lg border border-white/10 bg-slate-950/35 p-4">
-          <ConfidenceLine
-            label="How sure I am"
-            score={recommendation.recommendationConfidence.score}
-            level={recommendation.recommendationConfidence.level}
-            note="How comfortable I am recommending this car for your stated needs."
-          />
-          <ConfidenceLine
-            label="How solid the facts are"
-            score={recommendation.dataQualityConfidence.score}
-            level={recommendation.dataQualityConfidence.level}
-            note="How complete and trustworthy the vehicle facts are right now."
-          />
-          {needsDataDisclosure ? (
-            <p className="text-sm font-semibold leading-6 text-slate-300">
-              I’d verify the live price, mileage, and condition before treating this as more than a shortlist choice.
-            </p>
-          ) : null}
-        </div>
-      </DisclosureSection>
-
-      <DisclosureSection eyebrow="What will ownership cost?" title="What should I budget each month?">
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+      <section className="rounded-lg border border-white/10 bg-white/[0.035] p-4 md:p-5">
+        <SectionHeader eyebrow="Car details" title="Ownership snapshot" />
+        <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
           <InfoTile label="Purchase price" value={formatMoney(topVehicle.price)} />
           <InfoTile label="Monthly ownership" value={`${formatMoney(recommendation.ownershipSummary.estimatedMonthlyTotal)}/mo`} />
           <InfoTile label="Insurance" value={`${formatMoney(recommendation.ownershipSummary.insuranceMonthly)}/mo`} />
@@ -199,16 +139,45 @@ export function VisibleIntelligenceResults({
           <InfoTile label="First-year ownership" value={formatMoney(recommendation.firstYearOwnershipEstimate.total)} />
           <BudgetHeadroom monthlyHeadroom={monthlyHeadroom} profile={profile} />
         </div>
+      </section>
+
+      <DisclosureSection eyebrow="Decision details" title="Why this recommendation">
+        <div className="grid gap-4">
+          <PolicySummaryPanel summary={communication.policySummary} />
+          {communication.runnerUp ? (
+            <NoteList
+              title={`Closest alternative: ${communication.runnerUp.vehicleName}`}
+              items={[communication.runnerUp.explanation]}
+            />
+          ) : null}
+          <NoteList title="Assumptions" items={communication.assumptions} />
+          <NoteList title="Data limitations" items={communication.dataLimitations} />
+        </div>
       </DisclosureSection>
 
-      <DisclosureSection eyebrow="Supporting evidence" title="What facts are you relying on?">
+      <DisclosureSection eyebrow="Confidence" title="How certain is this?">
+        <div className="grid gap-3 md:grid-cols-2">
+          <NoteList title="Recommendation confidence" items={[communication.confidence.recommendation]} />
+          <NoteList title="Vehicle-data confidence" items={[communication.confidence.dataQuality]} />
+        </div>
+      </DisclosureSection>
+
+      <DisclosureSection eyebrow="Alternatives" title="Other strong options">
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          <PerspectiveCard title="Best overall" choice={decisionReport.bestOverall} recommendation={findRecommendation(decisionSet, decisionReport.bestOverall)} />
+          <PerspectiveCard title="Best value" choice={decisionReport.bestValue} recommendation={findRecommendation(decisionSet, decisionReport.bestValue)} />
+          <PerspectiveCard title="Safest choice" choice={decisionReport.safestChoice} recommendation={findRecommendation(decisionSet, decisionReport.safestChoice)} />
+          <PerspectiveCard title="Preference match" choice={decisionReport.userPreferredChoice} recommendation={findRecommendation(decisionSet, decisionReport.userPreferredChoice)} />
+        </div>
+      </DisclosureSection>
+
+      <DisclosureSection eyebrow="Transparency" title="Technical details">
         <div className="grid gap-4 xl:grid-cols-2">
-          <NoteList title="What priorities did you use?" items={formatSignals(decisionReport.userPriorities)} />
-          <ConstraintList title="What requirements had to pass?" constraints={decisionReport.hardRequirements} />
-          <TradeoffList tradeoffs={decisionReport.primaryTradeoffs} />
-          <NoteList title="What are you assuming?" items={formatAssumptions(decisionReport.assumptions)} />
-          <NoteList title="What numbers are estimated?" items={estimatedFields} />
-          <NoteList title="What information is still missing?" items={missingInformation} />
+          <TechnicalDetailList title="Search funnel" items={communication.technicalDetails.pipeline} />
+          <TechnicalDetailList title="Effective comparison weights" items={communication.technicalDetails.effectiveWeights} />
+          <TechnicalDetailList title="Score contributions" items={communication.technicalDetails.contributions} />
+          <TechnicalDetailList title="Confidence inputs" items={communication.technicalDetails.confidenceInputs} />
+          <TechnicalDetailList title="Requirements checked" items={communication.technicalDetails.constraints} />
           <ProvenanceList provenance={recommendation.fieldProvenance} />
         </div>
       </DisclosureSection>
@@ -216,24 +185,33 @@ export function VisibleIntelligenceResults({
   );
 }
 
-function VehicleImage({ compact = false, vehicle }: { compact?: boolean; vehicle: ScoredVehicle }) {
+function VehicleImage({ compact = false, vehicle }: { compact?: boolean; vehicle: ScoredVehicle | Vehicle }) {
+  const [imageFailed, setImageFailed] = useState(false);
+  useEffect(() => {
+    setImageFailed(false);
+  }, [vehicle.id, vehicle.imageUrl]);
   const wrapperClass = compact
     ? "relative min-h-[190px] overflow-hidden rounded-lg bg-slate-900 md:min-h-[230px] lg:min-h-[260px]"
     : "relative min-h-[200px] overflow-hidden bg-slate-900 md:min-h-[260px] lg:min-h-[360px]";
   const mediaClass = compact
     ? "h-full min-h-[190px] w-full object-cover md:min-h-[230px] lg:min-h-[260px]"
     : "h-full min-h-[200px] w-full object-cover md:min-h-[260px] lg:min-h-[360px]";
+  const photoState = getVehiclePhotoState(vehicle, imageFailed);
 
   return (
     <div className={wrapperClass}>
-      {vehicle.imageUrl ? (
+      {photoState === "photo" ? (
         <img
           alt={`${vehicle.year} ${vehicle.make} ${vehicle.model}`}
           className={mediaClass}
+          onError={() => setImageFailed(true)}
           src={vehicle.imageUrl}
         />
       ) : (
-        <div aria-hidden="true" className={`relative h-full bg-slate-900 ${compact ? "min-h-[190px] md:min-h-[230px] lg:min-h-[260px]" : "min-h-[200px] md:min-h-[260px] lg:min-h-[360px]"}`}>
+        <div className={`relative h-full bg-slate-900 ${compact ? "min-h-[190px] md:min-h-[230px] lg:min-h-[260px]" : "min-h-[200px] md:min-h-[260px] lg:min-h-[360px]"}`}>
+          <p className="absolute left-4 top-4 rounded-full border border-white/10 bg-white/[0.06] px-3 py-1 text-xs font-black uppercase tracking-[0.1em] text-slate-300">
+            Photo unavailable
+          </p>
           <div className="absolute inset-x-[14%] bottom-[28%] h-[18%] rounded-t-full border border-white/10 bg-white/[0.05]" />
           <div className="absolute bottom-[24%] left-1/2 h-3 w-36 -translate-x-1/2 rounded-full bg-cyan-300/20" />
           <div className="absolute bottom-[22%] left-[31%] h-8 w-8 rounded-full border border-white/15 bg-slate-950" />
@@ -281,7 +259,7 @@ function BudgetHeadroom({ monthlyHeadroom, profile }: { monthlyHeadroom: number;
       monthlyHeadroom >= 0 ? "border-emerald-300/20 bg-emerald-300/10" : "border-amber-300/25 bg-amber-300/10"
     }`}>
       <span className="text-xs font-black uppercase tracking-[0.12em] text-slate-300">
-        {monthlyHeadroom >= 0 ? "Budget headroom" : "Budget conflict"}
+        {monthlyHeadroom >= 0 ? "Budget Headroom" : "Budget Gap"}
       </span>
       <strong className="mt-1 block text-xl font-black text-white">
         {monthlyHeadroom >= 0 ? `${formatMoney(monthlyHeadroom)}/mo remaining` : `${formatMoney(Math.abs(monthlyHeadroom))}/mo over limit`}
@@ -338,7 +316,7 @@ function PipelineStrip({ debug }: { debug: CandidatePipelineDebug }) {
     { label: "Ruled out", value: debug.excludedCount },
     { label: "Still a fit", value: debug.qualifiedCount },
     { label: "Compared closely", value: debug.filteredCount },
-    { label: "My recommendation", value: debug.topFive[0] ? 1 : 0 },
+    { label: "Recommendation", value: debug.topFive[0] ? 1 : 0 },
   ];
 
   return (
@@ -385,7 +363,7 @@ function SuggestedFollowUps({ prompt, suggestions }: { prompt: string; suggestio
 
   return (
     <section className="rounded-lg border border-cyan-200/15 bg-cyan-200/[0.055] p-4 md:p-5">
-      <p className="text-xs font-black uppercase tracking-[0.14em] text-cyan-200">What should I ask next?</p>
+      <p className="text-xs font-black uppercase tracking-[0.14em] text-cyan-200">Advisor prompts</p>
       <p className="mt-2 max-w-3xl text-sm font-bold leading-6 text-cyan-50">{prompt}</p>
       <div className="mt-4 flex flex-wrap gap-2">
         {visibleSuggestions.map((suggestion) => (
@@ -401,7 +379,7 @@ function SuggestedFollowUps({ prompt, suggestions }: { prompt: string; suggestio
 function ChangeFactors({ items }: { items: string[] }) {
   return (
     <div className="rounded-lg border border-cyan-300/20 bg-cyan-300/10 p-4">
-      <p className="text-xs font-black uppercase tracking-[0.14em] text-cyan-100">What would change your advice?</p>
+      <p className="text-xs font-black uppercase tracking-[0.14em] text-cyan-100">Change factors</p>
       <ul className="mt-2 grid gap-2 text-sm font-semibold leading-6 text-cyan-50/90">
         {(items.length ? items : ["I don’t see a clear change factor from the current profile."]).map((item) => (
           <li key={item}>{item}</li>
@@ -421,6 +399,51 @@ function NoteList({ title, items, className = "" }: { title: string; items: stri
           <li key={item}>{item}</li>
         ))}
       </ul>
+    </div>
+  );
+}
+
+function PolicySummaryPanel({ summary }: { summary: AdvisorPolicySummary }) {
+  const sections = [
+    { title: "What mattered most", items: summary.priorities },
+    { title: "Requirements", items: summary.requirements },
+    { title: "Left flexible", items: summary.flexible },
+    { title: "Intentionally left out", items: summary.ignored },
+    { title: "Still open", items: summary.unresolved },
+    { title: "Understood, not scored", items: summary.understoodNotScored },
+  ].filter((section) => section.items.length);
+
+  return (
+    <div className="grid gap-3 md:grid-cols-2">
+      {sections.map((section) => (
+        <NoteList items={section.items} key={section.title} title={section.title} />
+      ))}
+    </div>
+  );
+}
+
+function TechnicalDetailList({
+  title,
+  items,
+}: {
+  title: string;
+  items: AdvisorTechnicalDetail[];
+}) {
+  return (
+    <div className="rounded-lg border border-white/10 bg-slate-950/35 p-3">
+      <h3 className="text-xs font-black uppercase tracking-[0.12em] text-slate-400">{title}</h3>
+      <dl className="mt-2 grid gap-2">
+        {items.length ? (
+          items.map((item) => (
+            <div className="rounded-md border border-white/10 bg-white/[0.035] px-3 py-2" key={`${item.label}-${item.value}`}>
+              <dt className="text-sm font-black text-white">{item.label}</dt>
+              <dd className="mt-1 text-xs font-semibold leading-5 text-slate-400">{item.value}</dd>
+            </div>
+          ))
+        ) : (
+          <div className="text-sm font-semibold text-slate-400">No details are available for this section.</div>
+        )}
+      </dl>
     </div>
   );
 }
@@ -455,7 +478,7 @@ function ConstraintList({ title, constraints }: { title: string; constraints: Ha
 function TradeoffList({ tradeoffs }: { tradeoffs: RecommendationTradeoff[] }) {
   return (
     <div className="rounded-lg border border-white/10 bg-slate-950/35 p-3">
-      <h3 className="text-xs font-black uppercase tracking-[0.12em] text-slate-400">What are the tradeoffs?</h3>
+      <h3 className="text-xs font-black uppercase tracking-[0.12em] text-slate-400">Tradeoffs</h3>
       <ul className="mt-2 grid gap-2 text-sm font-semibold leading-6 text-slate-300">
         {tradeoffs.length ? (
           tradeoffs.map((tradeoff) => (
@@ -475,7 +498,7 @@ function TradeoffList({ tradeoffs }: { tradeoffs: RecommendationTradeoff[] }) {
 function ProvenanceList({ provenance }: { provenance: FieldProvenance[] }) {
   return (
     <div className="rounded-lg border border-white/10 bg-slate-950/35 p-3">
-      <h3 className="text-xs font-black uppercase tracking-[0.12em] text-slate-400">Where did the facts come from?</h3>
+      <h3 className="text-xs font-black uppercase tracking-[0.12em] text-slate-400">Sources</h3>
       <div className="mt-2 grid gap-2 sm:grid-cols-2">
         {provenance.map((item) => (
           <div className="rounded-md border border-white/10 bg-white/[0.035] px-3 py-2" key={`${item.field}-${item.method}`}>
@@ -490,20 +513,11 @@ function ProvenanceList({ provenance }: { provenance: FieldProvenance[] }) {
   );
 }
 
-function getAdvisorText(recommendation: RecommendationObject, vehicle: ScoredVehicle) {
-  const strongestReasons = recommendation.reasonsForRecommendation.slice(0, 2).map(formatSignalShort);
-  const sentenceReasons = strongestReasons.map(lowerFirst).join(" and ");
-  const runner = strongestReasons.length
-    ? `I’d recommend it because ${sentenceReasons}.`
-    : `I’d recommend it because it has the strongest qualified match at ${recommendation.overallMatchScore}/100.`;
-  return {
-    headline: `I’d recommend the ${vehicle.year} ${vehicle.make} ${vehicle.model}.`,
-    reason: runner,
-  };
-}
-
 function getPrimaryReasons(recommendation: RecommendationObject) {
-  const reasons = recommendation.reasonsForRecommendation.slice(0, 3).map(formatSignalShort);
+  const reasons = recommendation.reasonsForRecommendation
+    .filter((signal) => (typeof signal.score === "number" ? signal.score >= 70 : true))
+    .slice(0, 3)
+    .map(formatSignalShort);
   if (reasons.length >= 3) return reasons;
   return [
     ...reasons,
@@ -513,9 +527,14 @@ function getPrimaryReasons(recommendation: RecommendationObject) {
 }
 
 function getConversationalReasons(narrativeReasons: string[], fallbackReasons: string[]) {
-  const reasons = narrativeReasons.filter(Boolean).slice(0, 3);
+  const reasons = narrativeReasons.filter(isPositiveAdvisorReason).slice(0, 3);
   if (reasons.length >= 3) return reasons;
   return [...reasons, ...fallbackReasons].slice(0, 3);
+}
+
+function isPositiveAdvisorReason(reason: string) {
+  const lower = reason.toLowerCase();
+  return Boolean(reason.trim()) && !/(concern|concerning|weak|tradeoff|verify|missing|risk|worse|lower|penalty)/.test(lower);
 }
 
 function getBiggestTradeoff(recommendation: RecommendationObject) {
@@ -553,10 +572,6 @@ function findRecommendation(decisionSet: RecommendationDecisionSet, choice: Deci
 
 function formatSignals(signals: RecommendationSignal[]) {
   return signals.map(formatSignalDetail);
-}
-
-function lowerFirst(text: string) {
-  return text ? `${text[0].toLowerCase()}${text.slice(1)}` : text;
 }
 
 function formatSignalShort(signal: RecommendationSignal) {

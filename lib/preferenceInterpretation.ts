@@ -1,7 +1,11 @@
 import type { BuyerProfile } from "@/types/buyer";
+import type { CanonicalSemanticIntent, SemanticSupportStatus } from "./carDomainOntology";
+import { recognizeMakesInText, normalizeVehicleMake } from "./makeRegistry";
+import type { CanonicalMappedConcept } from "./semanticMapping";
+import type { DecisionParticipationPolicyMap } from "@/types/decisionPolicy";
 
 export type BuyerProfilePatch = Partial<Omit<BuyerProfile, "scoreWeights">>;
-export type PreferenceParserSource = "local" | "openai" | "fallback";
+export type PreferenceParserSource = "local" | "openai" | "semantic" | "fallback";
 export type InterpretationConfidence = "high" | "medium" | "low";
 
 export type PreferenceFact = {
@@ -9,6 +13,9 @@ export type PreferenceFact = {
   value: string;
   evidencePhrase: string;
   field?: keyof BuyerProfilePatch;
+  mappingId?: string;
+  canonicalIntent?: CanonicalSemanticIntent;
+  supportStatus?: SemanticSupportStatus;
 };
 
 export type InferredPreference = {
@@ -17,6 +24,11 @@ export type InferredPreference = {
   evidencePhrase: string;
   field?: keyof BuyerProfilePatch;
   requiresConfirmation: boolean;
+  semanticConcept?: string;
+  recommendationSupport?: "used_in_recommendation" | "understood_not_ranked";
+  mappingId?: string;
+  canonicalIntent?: CanonicalSemanticIntent;
+  supportStatus?: SemanticSupportStatus;
 };
 
 export type PreferenceUncertainty = {
@@ -33,10 +45,13 @@ export type PreferenceConflict = {
 
 export type PreferenceFieldConfidence = {
   field: keyof BuyerProfilePatch;
-  value: string | number | boolean;
+  value: string | number | boolean | string[];
   confidence: InterpretationConfidence;
   evidencePhrase: string;
   requiresConfirmation: boolean;
+  mappingId?: string;
+  canonicalIntent?: CanonicalSemanticIntent;
+  supportStatus?: SemanticSupportStatus;
 };
 
 export type PreferenceInterpretation = {
@@ -50,6 +65,8 @@ export type PreferenceInterpretation = {
   suggestedProfileUpdates: BuyerProfilePatch;
   nextClarifyingQuestion: string;
   parserSource: PreferenceParserSource;
+  canonicalMappings?: CanonicalMappedConcept[];
+  decisionPolicies?: DecisionParticipationPolicyMap;
 };
 
 const allowedPatchKeys = new Set<keyof BuyerProfilePatch>([
@@ -81,12 +98,15 @@ const allowedPatchKeys = new Set<keyof BuyerProfilePatch>([
   "safetyPriority",
   "requiredMake",
   "preferredMake",
+  "allowedMakes",
+  "excludedMakes",
   "requiredFuelType",
   "reliabilityMinimum",
   "safetyMinimum",
   "performanceMinimum",
   "flexibleConstraints",
   "allowCompromises",
+  "decisionPolicies",
 ]);
 
 export function interpretPreferenceMessage(rawUserMessage: string): PreferenceInterpretation {
@@ -209,10 +229,37 @@ function buildLocalInterpretation(rawUserMessage: string, parserSource: Preferen
     });
   }
 
-  const makeSignal = getMakeSignal(message);
+  const excludedMakeSignal = getExcludedMakeSignal(message);
+  if (excludedMakeSignal) {
+    suggestedProfileUpdates.excludedMakes = [excludedMakeSignal.make];
+    explicitFacts.push({
+      label: "Excluded make",
+      value: excludedMakeSignal.make,
+      evidencePhrase: excludedMakeSignal.evidencePhrase,
+      field: "excludedMakes",
+    });
+    confidenceByField.push({
+      field: "excludedMakes",
+      value: excludedMakeSignal.make,
+      confidence: "high",
+      evidencePhrase: excludedMakeSignal.evidencePhrase,
+      requiresConfirmation: false,
+    });
+  }
+
+  const makeSignal = excludedMakeSignal ? null : getMakeSignal(message);
   if (makeSignal) {
+    if (makeSignal.allowedMakes.length) suggestedProfileUpdates.allowedMakes = makeSignal.allowedMakes;
     if (makeSignal.required) suggestedProfileUpdates.requiredMake = makeSignal.make;
     else suggestedProfileUpdates.preferredMake = makeSignal.make;
+    if (makeSignal.allowedMakes.length) {
+      explicitFacts.push({
+        label: "Allowed makes",
+        value: makeSignal.allowedMakes.join(", "),
+        evidencePhrase: makeSignal.evidencePhrase,
+        field: "allowedMakes",
+      });
+    }
     explicitFacts.push({
       label: makeSignal.required ? "Required make" : "Preferred make",
       value: makeSignal.make,
@@ -222,10 +269,19 @@ function buildLocalInterpretation(rawUserMessage: string, parserSource: Preferen
     confidenceByField.push({
       field: makeSignal.required ? "requiredMake" : "preferredMake",
       value: makeSignal.make,
-      confidence: makeSignal.required ? "high" : "medium",
+      confidence: makeSignal.requiresConfirmation ? "medium" : "high",
       evidencePhrase: makeSignal.evidencePhrase,
-      requiresConfirmation: !makeSignal.required,
+      requiresConfirmation: makeSignal.requiresConfirmation,
     });
+    if (makeSignal.allowedMakes.length) {
+      confidenceByField.push({
+        field: "allowedMakes",
+        value: makeSignal.allowedMakes,
+        confidence: "high",
+        evidencePhrase: makeSignal.evidencePhrase,
+        requiresConfirmation: false,
+      });
+    }
   }
 
   addConditionSignals(message, explicitFacts, confidenceByField, suggestedProfileUpdates);
@@ -578,13 +634,16 @@ function addPracticalitySignals(
 ) {
   const practical = findEvidence(message, /\bcargo|road trips?|school commute|daily driver|commuter|camping|gear\b/i);
   if (!practical) return;
+  const isCamping = /\bcamping\b/i.test(practical);
   inferredPreferences.push({
-    label: "Everyday practicality matters",
-    value: "The car should be easy to live with in regular use.",
+    label: isCamping ? "Camping needs" : "Everyday practicality matters",
+    value: isCamping
+      ? "Camping trips matter, but I need a supported detail before using that in ranking."
+      : "The car should be easy to live with in regular use.",
     evidencePhrase: practical,
     requiresConfirmation: true,
   });
-  if (/\bcargo|road trips?|camping|gear\b/i.test(practical)) {
+  if (/\bcargo|road trips?|gear\b/i.test(practical)) {
     suggestedProfileUpdates.cargoNeed = "high";
     confidenceByField.push({
       field: "cargoNeed",
@@ -732,16 +791,46 @@ function getMonthlySignal(message: string) {
 }
 
 function getMakeSignal(message: string) {
-  const match = message.match(/\b(?:bmw|toyota|honda|mazda|lexus|subaru|ford|chevrolet|chevy|hyundai|kia|nissan|audi|mercedes)\b/i);
+  const matches = recognizeMakesInText(message);
+  const match = matches[0];
   if (!match) return null;
-  const nearbyStart = Math.max(0, match.index ? match.index - 18 : 0);
-  const nearbyEnd = Math.min(message.length, (match.index || 0) + match[0].length + 18);
+  const matchIndex = message.toLowerCase().indexOf(match.rawText.toLowerCase());
+  const nearbyStart = Math.max(0, matchIndex >= 0 ? matchIndex - 18 : 0);
+  const nearbyEnd = Math.min(message.length, (matchIndex >= 0 ? matchIndex : 0) + match.rawText.length + 18);
   const nearbyPhrase = message.slice(nearbyStart, nearbyEnd).trim();
-  const required = /\b(must|only|required|require|has to be|need)\b/i.test(nearbyPhrase);
+  const preferenceLanguage = /\b(prefer|preferred|would prefer|like|would like|flexible|acceptable|okay|ok|if necessary|other .* okay|other .* acceptable)\b/i.test(message);
+  const explicitPreferenceLanguage = /\b(prefer|preferred|acceptable|okay|ok|if necessary|other .* okay|other .* acceptable)\b/i.test(message);
+  const referenceLanguage = /\b(look|looks|style|vibe|feeling|image|badge|brand image|luxury)\b/i.test(nearbyPhrase);
+  const ownershipTension = /\b(repairs?|maintenance|expensive to fix|ownership cost)\b/i.test(message);
+  const required =
+    !preferenceLanguage &&
+    !referenceLanguage &&
+    !ownershipTension &&
+    (message.trim().toLowerCase() === match.rawText.trim().toLowerCase() ||
+      /\b(want|show me|find|looking for|look for|buy|get|must|only|required|require|has to be|need)\b/i.test(nearbyPhrase));
+  const allowedMakes = matches.map((candidate) => candidate.canonicalName);
+  const fallbackAllowed = /\b(?:acceptable|okay|ok|if necessary|fallback|other .* okay|other .* acceptable)\b/i.test(message);
+  const requiresConfirmation = !required && !fallbackAllowed && !explicitPreferenceLanguage && (ownershipTension || referenceLanguage || /\blike|would like\b/i.test(message));
   return {
-    make: normalizeMake(match[0]),
+    make: match.canonicalName,
+    allowedMakes: fallbackAllowed ? Array.from(new Set(allowedMakes)) : [],
     required,
-    evidencePhrase: match[0],
+    requiresConfirmation,
+    evidencePhrase: match.rawText,
+  };
+}
+
+function getExcludedMakeSignal(message: string) {
+  const match = recognizeMakesInText(message)[0];
+  if (!match) return null;
+  const matchIndex = message.toLowerCase().indexOf(match.rawText.toLowerCase());
+  const nearbyStart = Math.max(0, matchIndex >= 0 ? matchIndex - 26 : 0);
+  const nearbyEnd = Math.min(message.length, (matchIndex >= 0 ? matchIndex : 0) + match.rawText.length + 20);
+  const nearbyPhrase = message.slice(nearbyStart, nearbyEnd).trim();
+  if (!/\b(?:do not want|don't want|dont want|avoid|exclude|no|not)\b/i.test(nearbyPhrase)) return null;
+  return {
+    make: match.canonicalName,
+    evidencePhrase: nearbyPhrase,
   };
 }
 
@@ -752,10 +841,7 @@ function parseMoney(amountText: string, hasK: boolean) {
 }
 
 function normalizeMake(make: string) {
-  const lower = make.toLowerCase();
-  if (lower === "chevy") return "Chevrolet";
-  if (lower === "bmw") return "BMW";
-  return lower.charAt(0).toUpperCase() + lower.slice(1);
+  return normalizeVehicleMake(make) || make;
 }
 
 function isExtremelyVague(lower: string, explicitFacts: PreferenceFact[], inferredPreferences: InferredPreference[]) {
@@ -879,7 +965,13 @@ function readConfidenceList(value: unknown): PreferenceFieldConfidence[] {
     return [
       {
         field,
-        value: typeof record.value === "number" || typeof record.value === "boolean" || typeof record.value === "string" ? record.value : "",
+        value:
+          typeof record.value === "number" ||
+          typeof record.value === "boolean" ||
+          typeof record.value === "string" ||
+          (Array.isArray(record.value) && record.value.every((item) => typeof item === "string"))
+            ? record.value as string | number | boolean | string[]
+            : "",
         confidence: confidence as InterpretationConfidence,
         evidencePhrase: readString(record.evidencePhrase),
         requiresConfirmation: Boolean(record.requiresConfirmation),

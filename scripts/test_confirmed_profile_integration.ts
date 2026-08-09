@@ -80,6 +80,10 @@ assert.equal(bmwPreferredConversion.buyerProfile.requiredMake, undefined);
 assert.equal(bmwPreferredConversion.buyerProfile.maxPurchaseBudget, 25000);
 assert.ok(bmwPreferredConversion.appliedSoftPreferences.some((item) => item.field === "preferredMake"));
 assert.ok(bmwPreferredConversion.appliedHardConstraints.some((item) => item.field === "maxPurchaseBudget"));
+assert.ok(
+  bmwPreferredConversion.preservedSemanticPreferences.some((item) => item.label === "Design and image matter"),
+  "unsupported semantic context should survive approval without changing BuyerProfile",
+);
 const bmwPreferredDecisionSet = getRecommendationDecisionSet(bmwPreferredConversion.buyerProfile, vehicleCatalog);
 assert.ok(
   bmwPreferredDecisionSet.primaryRecommendations.some((recommendation) => recommendation.vehicle.make !== "BMW"),

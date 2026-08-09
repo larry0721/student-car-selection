@@ -1,16 +1,23 @@
 "use client";
 
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
-import { AdvisorConversationPanel } from "@/components/AdvisorConversationPanel";
 import { DataImportPanel } from "@/components/DataImportPanel";
 import { VisibleIntelligenceResults } from "@/components/VisibleIntelligenceResults";
 import { vehicleCatalog } from "@/data/vehicleCatalog";
 import { calculateBudget, formatMoney, formatNumber } from "@/lib/affordability";
 import {
+  buildAdvisorCommunicationViewModel,
+  buildConfirmationCommunicationViewModel,
+  getOutOfScopeAdvisorMessage,
+  type AdvisorPolicySummary,
+} from "@/lib/advisorCommunication";
+import { assessCatalogIntentFeasibility } from "@/lib/advisorIntegrity";
+import {
   answerConversationQuestion,
-  createConversationIntakeSession,
+  createDeterministicSemanticConversationIntakeSession,
   getConciseUnderstanding,
   getLatestAdvisorTurn,
+  prepareConversationRevisionSession,
   requestAnotherConversationQuestion,
   skipConversationQuestion,
   type ConversationIntakeSession,
@@ -18,7 +25,6 @@ import {
 import {
   approveConfirmedPreferenceProfile,
   carryForwardConfirmedPreferenceDraft,
-  confirmPreferenceItem,
   createConfirmedPreferenceProfile,
   hasBlockingConfirmationIssue,
   removePreferenceItem,
@@ -54,9 +60,14 @@ import {
   rankVehicles,
   scoreWeightLabels,
 } from "@/lib/recommendations";
+import {
+  assessConfirmedPreferenceDraftReadiness,
+  assessConfirmedProfileConversionReadiness,
+  assessManualProfileReadiness,
+} from "@/lib/recommendationReadiness";
 import type { BuyerProfile, ScoreWeights } from "@/types/buyer";
 import type { DataProviderStatus, VehicleDataOverlay } from "@/types/data";
-import type { AiRecommendation, ScoredVehicle, Vehicle } from "@/types/vehicle";
+import type { AiRecommendation, DecisionReport, RecommendationDecisionSet, ScoredVehicle, Vehicle } from "@/types/vehicle";
 
 const defaultProfile: BuyerProfile = {
   maxPurchaseBudget: 18000,
@@ -96,6 +107,33 @@ type ScoreWeightField = keyof ScoreWeights;
 type AppView = "advisor" | "compare" | "advanced";
 type AdvisorStage = "describe" | "clarify" | "confirm" | "results" | "fine-tune";
 
+type AdvisorConversationPayload =
+  | { action: "start"; message: string }
+  | { action: "answer"; answer: string; session: ConversationIntakeSession };
+
+type RecommendationSearchSnapshot = {
+  sessionId: string;
+  source: "detailed" | "confirmed-profile" | "fine-tune" | "follow-up";
+  profile: BuyerProfile;
+  rankedVehicles: ScoredVehicle[];
+  decisionSet: RecommendationDecisionSet;
+  decisionReport: DecisionReport;
+  inputFingerprint: string;
+  resultFingerprint: string;
+};
+
+async function requestAdvisorConversation(payload: AdvisorConversationPayload): Promise<ConversationIntakeSession> {
+  const response = await fetch("/api/advisor-conversation", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) throw new Error("Advisor conversation request failed.");
+  const data = await response.json() as { session?: ConversationIntakeSession };
+  if (!data.session) throw new Error("Advisor conversation response did not include a session.");
+  return data.session;
+}
+
 const conversationStarterPrompts = [
   "I want something fun but still reliable.",
   "I need a safe first car under $15,000.",
@@ -134,28 +172,28 @@ export function BuyerProfilePlanner() {
   const [manualConflictNotes, setManualConflictNotes] = useState<string[]>([]);
   const [isFineTuneOpen, setIsFineTuneOpen] = useState(false);
   const [lastProfileUpdateSequence, setLastProfileUpdateSequence] = useState(0);
+  const [searchSnapshot, setSearchSnapshot] = useState<RecommendationSearchSnapshot | null>(null);
+  const [advisorFollowUpText, setAdvisorFollowUpText] = useState("");
+  const [isAdvisorFollowUp, setIsAdvisorFollowUp] = useState(false);
+  const searchSequenceRef = useRef(0);
   const resultsRef = useRef<HTMLElement | null>(null);
   const fineTuneRef = useRef<HTMLDetailsElement | null>(null);
 
   const budget = useMemo(() => calculateBudget(profile), [profile]);
-  const resultProfile = hasDetailedSearchRun ? lastAppliedProfile : profile;
+  const emptyDecisionSet = useMemo(() => getRecommendationDecisionSet(defaultProfile, []), []);
+  const resultProfile = searchSnapshot?.profile || profile;
   const resultBudget = useMemo(() => calculateBudget(resultProfile), [resultProfile]);
   const enrichedVehicles = useMemo(
     () => mergeVehicleData(vehicleCatalog, [...importedOverlays, ...onlineOverlays]),
     [importedOverlays, onlineOverlays],
   );
-  const matchedVehicles = useMemo(() => getRequirementMatches(resultProfile, enrichedVehicles), [resultProfile, enrichedVehicles]);
-  const rankedVehicles = useMemo(() => rankVehicles(resultProfile, matchedVehicles).slice(0, 10), [resultProfile, matchedVehicles]);
-  const recommendationDecisionSet = useMemo(
-    () => getRecommendationDecisionSet(resultProfile, enrichedVehicles),
-    [resultProfile, enrichedVehicles],
-  );
-  const decisionReport = useMemo(() => buildDecisionReport(recommendationDecisionSet), [recommendationDecisionSet]);
+  const emptyDecisionReport = useMemo(() => buildDecisionReport(emptyDecisionSet), [emptyDecisionSet]);
+  const rankedVehicles = searchSnapshot?.rankedVehicles || [];
+  const recommendationDecisionSet = searchSnapshot?.decisionSet || emptyDecisionSet;
+  const decisionReport = searchSnapshot?.decisionReport || emptyDecisionReport;
   const normalizedWeights = useMemo(() => normalizeScoreWeights(profile.scoreWeights), [profile.scoreWeights]);
-  const answeredCount = getAnsweredCount(profile);
-  const comparedVehicles = getComparedVehicles(rankedVehicles, compareIds);
-  const hasNoMatch = rankedVehicles.length === 0;
-  const noMatchReasons = useMemo(() => getNoMatchReasons(resultProfile, enrichedVehicles), [resultProfile, enrichedVehicles]);
+  const comparedVehicles = searchSnapshot ? getComparedVehicles(rankedVehicles, compareIds) : [];
+  const hasNoMatch = Boolean(searchSnapshot) && rankedVehicles.length === 0;
   const unsavedSummary = useMemo(() => summarizeFineTuneChanges(unsavedFineTuneFields), [unsavedFineTuneFields]);
   const profileSourceLabel = getProfileSourceLabel({
     hasConversation: Boolean(approvedPreferenceProfile || advisorConfirmedProfile),
@@ -171,12 +209,19 @@ export function BuyerProfilePlanner() {
           ? "confirm"
           : "describe";
 
+  function clearCurrentSearchResult(status?: string) {
+    setSearchSnapshot(null);
+    setHasDetailedSearchRun(false);
+    setCompareIds([]);
+    setAiRecommendations([]);
+    if (status) setAiStatus(status);
+  }
+
   function updateProfile(nextProfile: BuyerProfile) {
     setConfirmedProfileConversion(null);
     setProfile(nextProfile);
     setLastSavedProfile(nextProfile);
-    setAiRecommendations([]);
-    setAiStatus("Preferences changed. Update the recommendation when you want me to check them.");
+    clearCurrentSearchResult("Preferences changed. Confirm or update the recommendation before I show a result.");
   }
 
   function updateFineTuneProfile(nextProfile: BuyerProfile, field: keyof BuyerProfile, label = getFineTuneFieldLabel(field)) {
@@ -185,7 +230,7 @@ export function BuyerProfilePlanner() {
     setFineTuneMetadata((current) => markManualFieldEdit(current, field, label, getConstraintStrengthForProfileField(nextProfile, field)));
     setUnsavedFineTuneFields((current) => Array.from(new Set([...current, field])));
     if (note) setManualConflictNotes((current) => Array.from(new Set([...current, note])));
-    setAiStatus("Fine-tuning changes are ready. Update my recommendation when you want to rerun the advisor.");
+    clearCurrentSearchResult("Fine-tuning changed the profile. The previous recommendation was cleared; update when you want me to check the new version.");
   }
 
   async function applyWrittenRequirements(currentProfile: BuyerProfile) {
@@ -235,31 +280,99 @@ export function BuyerProfilePlanner() {
     setManualConflictNotes([]);
     setIsFineTuneOpen(false);
     setLastProfileUpdateSequence(0);
+    setSearchSnapshot(null);
+    setAdvisorFollowUpText("");
+    setIsAdvisorFollowUp(false);
     updateProfile(defaultProfile);
+    setAiStatus("Answer a few questions or browse the draft matches.");
   }
 
   async function startAdvisorConversation() {
     if (!advisorOpeningText.trim()) return;
+    setIsAdvisorFollowUp(false);
+    const profileWithoutMakeState = clearMakeState(profile);
+    setProfile(profileWithoutMakeState);
+    setLastAppliedProfile(profileWithoutMakeState);
+    setLastSavedProfile(profileWithoutMakeState);
+    clearCurrentSearchResult("Starting a new advisor search.");
+    setApprovedPreferenceProfile(null);
+    setConfirmedProfileConversion(null);
+    setAdvisorConfirmedProfile(null);
+    setFineTuneMetadata({});
+    setUnsavedFineTuneFields([]);
+    setManualConflictNotes([]);
     setIsInterpretingPreference(true);
     setAdvisorOpeningMessage("I’m reading that carefully.");
-    const session = createConversationIntakeSession(advisorOpeningText);
-    setIntakeSession(session);
-    setApprovedPreferenceProfile(null);
-    setConfirmedProfileConversion(null);
-    setManualConflictNotes([]);
-    setAdvisorOpeningMessage("");
-    setIsInterpretingPreference(false);
+    try {
+      const session = await requestAdvisorConversation({
+        action: "start",
+        message: advisorOpeningText,
+      }).catch(() => createDeterministicSemanticConversationIntakeSession(advisorOpeningText));
+      setIntakeSession(session);
+      setApprovedPreferenceProfile(null);
+      setConfirmedProfileConversion(null);
+      setManualConflictNotes([]);
+      setAdvisorOpeningMessage("");
+    } finally {
+      setIsInterpretingPreference(false);
+    }
   }
 
-  function answerIntakeQuestion(answer: string) {
-    if (!intakeSession) return;
-    setIntakeSession(answerConversationQuestion(intakeSession, answer));
+  async function startAdvisorFollowUp() {
+    const message = advisorFollowUpText.trim();
+    if (!message) return;
+    clearCurrentSearchResult("I’m updating the current profile from your follow-up.");
     setApprovedPreferenceProfile(null);
     setConfirmedProfileConversion(null);
+    setIsAdvisorFollowUp(true);
+    setIsInterpretingPreference(true);
+    setAdvisorOpeningText(message);
+    setAdvisorOpeningMessage("I’m applying that change to the preferences you already confirmed.");
+    try {
+      const revisionSession = intakeSession
+        ? prepareConversationRevisionSession(intakeSession, profile)
+        : null;
+      const session = await (
+        revisionSession
+          ? requestAdvisorConversation({
+              action: "answer",
+              answer: message,
+              session: revisionSession,
+            })
+          : requestAdvisorConversation({
+              action: "start",
+              message,
+            })
+      ).catch(() => createDeterministicSemanticConversationIntakeSession(message));
+      setIntakeSession(session);
+      setAdvisorOpeningMessage("");
+      setAdvisorFollowUpText("");
+    } finally {
+      setIsInterpretingPreference(false);
+    }
+  }
+
+  async function answerIntakeQuestion(answer: string) {
+    if (!intakeSession) return;
+    clearCurrentSearchResult();
+    setIsInterpretingPreference(true);
+    try {
+      const nextSession = await requestAdvisorConversation({
+        action: "answer",
+        answer,
+        session: intakeSession,
+      }).catch(() => answerConversationQuestion(intakeSession, answer));
+      setIntakeSession(nextSession);
+      setApprovedPreferenceProfile(null);
+      setConfirmedProfileConversion(null);
+    } finally {
+      setIsInterpretingPreference(false);
+    }
   }
 
   function skipIntakeQuestion() {
     if (!intakeSession) return;
+    clearCurrentSearchResult();
     setIntakeSession(skipConversationQuestion(intakeSession));
     setApprovedPreferenceProfile(null);
     setConfirmedProfileConversion(null);
@@ -267,6 +380,7 @@ export function BuyerProfilePlanner() {
 
   function askAnotherIntakeQuestion() {
     if (!intakeSession) return;
+    clearCurrentSearchResult();
     setIntakeSession(requestAnotherConversationQuestion(intakeSession));
     setApprovedPreferenceProfile(null);
     setConfirmedProfileConversion(null);
@@ -276,6 +390,7 @@ export function BuyerProfilePlanner() {
     if (!intakeSession) return;
     const approved = approveConfirmedPreferenceProfile(draft, intakeSession.conversationTurns.length + 1);
     const conversion = convertConfirmedPreferencesToBuyerProfile(profile, approved);
+    const readiness = assessConfirmedProfileConversionReadiness(conversion);
     setApprovedPreferenceProfile(approved);
     setConfirmedProfileConversion(conversion);
     setAdvisorConfirmedProfile(conversion.buyerProfile);
@@ -284,8 +399,13 @@ export function BuyerProfilePlanner() {
     setManualConflictNotes([]);
     setLastProfileUpdateSequence((current) => current + 1);
     setIntakeSession({ ...intakeSession, intakeStatus: "confirmed" });
+    if (!readiness.ready) {
+      clearCurrentSearchResult(readiness.clarificationQuestion);
+      setAiStatus(readiness.clarificationQuestion);
+      return;
+    }
     await searchRecommendations(conversion.buyerProfile, {
-      source: "confirmed-profile",
+      source: isAdvisorFollowUp ? "follow-up" : "confirmed-profile",
       conversion,
       skipWrittenRequirements: true,
     });
@@ -361,7 +481,7 @@ export function BuyerProfilePlanner() {
   function getOnlineLookupVehicles(currentProfile: BuyerProfile) {
     const currentMatches = getRequirementMatches(currentProfile, mergeVehicleData(vehicleCatalog, importedOverlays));
     const shortlist = rankVehicles(currentProfile, currentMatches).slice(0, 10);
-    return shortlist.length ? shortlist : vehicleCatalog.slice(0, 10);
+    return shortlist;
   }
 
   async function fetchOnlineDataOverlays(currentProfile: BuyerProfile = profile) {
@@ -418,20 +538,37 @@ export function BuyerProfilePlanner() {
     options: {
       conversion?: ConfirmedProfileConversion;
       skipWrittenRequirements?: boolean;
-      source?: "detailed" | "confirmed-profile" | "fine-tune";
+      source?: RecommendationSearchSnapshot["source"];
       changedFields?: Array<keyof BuyerProfile>;
       beforeTop?: string;
       beforeQualified?: number;
     } = {},
   ) {
-    if (options.source !== "fine-tune") setHasDetailedSearchRun(false);
+    const searchSessionId = createRecommendationSessionId(++searchSequenceRef.current);
+    clearCurrentSearchResult();
     setIsSearching(true);
     setIsLoadingOnlineData(true);
     setIsPersonalizing(true);
     setAiRecommendations([]);
-    if (options.source === "confirmed-profile") {
+    if (options.source === "confirmed-profile" || options.source === "follow-up") {
+      const readiness = assessConfirmedProfileConversionReadiness(options.conversion);
+      if (!readiness.ready) {
+        setAiStatus(readiness.clarificationQuestion);
+        setIsSearching(false);
+        setIsLoadingOnlineData(false);
+        setIsPersonalizing(false);
+        return;
+      }
       setAiStatus("I have enough to make a responsible recommendation. I’m checking the car list now.");
     } else if (options.source === "fine-tune") {
+      const readiness = assessManualProfileReadiness(baseProfile, options.changedFields || []);
+      if (!readiness.ready) {
+        setAiStatus(readiness.clarificationQuestion);
+        setIsSearching(false);
+        setIsLoadingOnlineData(false);
+        setIsPersonalizing(false);
+        return;
+      }
       setAiStatus("I’m checking the updated preferences once.");
     } else {
       setConfirmedProfileConversion(null);
@@ -439,15 +576,12 @@ export function BuyerProfilePlanner() {
     }
 
     let freshOnlineOverlays = onlineOverlays;
-    let onlineStatus = "";
     let searchProfile = baseProfile;
-    let writtenStatus = "";
 
     if (!options.skipWrittenRequirements) {
       try {
         const interpreted = await applyWrittenRequirements(baseProfile);
         searchProfile = interpreted.profile;
-        writtenStatus = interpreted.summary;
       } catch (error) {
         setAiStatus(error instanceof Error ? error.message : "Could not understand written requirements.");
         setIsSearching(false);
@@ -465,11 +599,12 @@ export function BuyerProfilePlanner() {
       setOnlineOverlays(freshOnlineOverlays);
       setDataWarnings(onlineData.warnings);
       setProviderStatus(onlineData.providerStatus);
-      onlineStatus = freshOnlineOverlays.length
-        ? `${freshOnlineOverlays.length} online overlay${freshOnlineOverlays.length === 1 ? "" : "s"}${onlineData.warnings.length ? ` (${onlineData.warnings.join(" ")})` : ""}`
-        : `built-in car list fallback${onlineData.warnings.length ? ` (${onlineData.warnings.join(" ")})` : ""}`;
     } catch (error) {
-      onlineStatus = "online data unavailable";
+      setDataWarnings((current) =>
+        current.includes("Online vehicle data could not be refreshed.")
+          ? current
+          : [...current, "Online vehicle data could not be refreshed."],
+      );
     } finally {
       setIsLoadingOnlineData(false);
     }
@@ -478,6 +613,18 @@ export function BuyerProfilePlanner() {
       const mergedVehicles = mergeVehicleData(vehicleCatalog, [...importedOverlays, ...freshOnlineOverlays]);
       const strictMatches = getRequirementMatches(searchProfile, mergedVehicles);
       if (!strictMatches.length) {
+        const noMatchDecisionSet = getRecommendationDecisionSet(searchProfile, mergedVehicles);
+        const noMatchDecisionReport = buildDecisionReport(noMatchDecisionSet);
+        const noMatchSnapshot = createSearchSnapshot({
+          decisionReport: noMatchDecisionReport,
+          decisionSet: noMatchDecisionSet,
+          profile: searchProfile,
+          rankedVehicles: [],
+          sessionId: searchSessionId,
+          source: options.source || "detailed",
+        });
+        setSearchSnapshot(noMatchSnapshot);
+        logRecommendationDiagnostics(noMatchSnapshot);
         setAiRecommendations([]);
         if (options.source === "fine-tune") {
           const summary = summarizeRecommendationChange({
@@ -493,12 +640,12 @@ export function BuyerProfilePlanner() {
           setManualConflictNotes([]);
           setLastProfileUpdateSequence((current) => current + 1);
         }
-        setLastAppliedProfile(searchProfile);
         setHasDetailedSearchRun(true);
+        setLastAppliedProfile(searchProfile);
         setAiStatus(
-          options.source === "confirmed-profile"
-            ? `No match. I applied the preferences you confirmed, but no vehicle passed every required condition. Data used: ${onlineStatus}.`
-            : `No match. ${writtenStatus ? `${writtenStatus} ` : ""}No cars satisfy every selected requirement. Data used: ${onlineStatus}.`,
+          options.source === "confirmed-profile" || options.source === "follow-up"
+            ? "I applied the preferences you confirmed, but no vehicle passed every required condition."
+            : "No vehicle in the current car list satisfies every selected requirement.",
         );
         return;
       }
@@ -522,6 +669,24 @@ export function BuyerProfilePlanner() {
 
       setAiRecommendations(payload.recommendations || []);
       const mergedDecisionSet = getRecommendationDecisionSet(searchProfile, mergedVehicles);
+      const rankedSearchVehicles = rankVehicles(searchProfile, strictMatches).slice(0, 10);
+      const mergedDecisionReport = buildDecisionReport(mergedDecisionSet);
+      setSearchSnapshot(createSearchSnapshot({
+        decisionReport: mergedDecisionReport,
+        decisionSet: mergedDecisionSet,
+        profile: searchProfile,
+        rankedVehicles: rankedSearchVehicles,
+        sessionId: searchSessionId,
+        source: options.source || "detailed",
+      }));
+      logRecommendationDiagnostics({
+        decisionReport: mergedDecisionReport,
+        decisionSet: mergedDecisionSet,
+        profile: searchProfile,
+        rankedVehicles: rankedSearchVehicles,
+        sessionId: searchSessionId,
+        source: options.source || "detailed",
+      });
       const afterTop = getTopVehicleName(mergedDecisionSet);
       const afterQualified = mergedDecisionSet.pipelineDebug.qualifiedCount;
       if (options.source === "fine-tune") {
@@ -542,10 +707,12 @@ export function BuyerProfilePlanner() {
       setHasDetailedSearchRun(true);
       setAiStatus(
         options.source === "confirmed-profile"
-          ? `I used your confirmed preferences and checked the car list. Data used: ${onlineStatus}.`
+          ? "Your recommendation is ready."
+          : options.source === "follow-up"
+            ? "I updated the recommendation using your latest correction."
           : options.source === "fine-tune"
-            ? `I updated the recommendation from your fine-tuned preferences. Data used: ${onlineStatus}.`
-          : `${writtenStatus ? `${writtenStatus} ` : ""}I checked your preferences against the car list. Data used: ${onlineStatus}.`,
+            ? "I updated the recommendation from your fine-tuned preferences."
+            : "I checked your preferences against the car list.",
       );
     } catch (error) {
       setAiStatus(error instanceof Error ? error.message : "Could not personalize recommendations");
@@ -566,7 +733,7 @@ export function BuyerProfilePlanner() {
             <div>
               <p className="text-xs font-black uppercase tracking-[0.18em] text-cyan-300">Personalized Car Advisor</p>
               <h1 className="mt-1 text-2xl font-black tracking-tight text-white md:text-4xl">
-                What first car actually fits you?
+                First-Car Advisor
               </h1>
             </div>
             <div className="flex flex-wrap gap-2">
@@ -589,6 +756,7 @@ export function BuyerProfilePlanner() {
 
             <ConversationStarter
               approvedDraft={approvedPreferenceProfile}
+              baseProfile={profile}
               hasResults={hasDetailedSearchRun}
               intakeSession={intakeSession}
               isLoading={isInterpretingPreference}
@@ -601,6 +769,7 @@ export function BuyerProfilePlanner() {
                 setApprovedPreferenceProfile(null);
                 setConfirmedProfileConversion(null);
                 setFineTuneMetadata({});
+                clearCurrentSearchResult("New request started. Confirm preferences before I show a recommendation.");
               }}
               onPromptSelect={(prompt) => {
                 setAdvisorOpeningText(prompt);
@@ -609,6 +778,7 @@ export function BuyerProfilePlanner() {
                 setApprovedPreferenceProfile(null);
                 setConfirmedProfileConversion(null);
                 setFineTuneMetadata({});
+                clearCurrentSearchResult("New request started. Confirm preferences before I show a recommendation.");
               }}
               onAnswerQuestion={answerIntakeQuestion}
               onApproveDraft={approveIntakeDraft}
@@ -651,20 +821,11 @@ export function BuyerProfilePlanner() {
 
             {hasDetailedSearchRun ? (
               <>
-                <section className="grid gap-4" ref={resultsRef}>
-                  <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
-                    <div>
-                      <h2 className="text-2xl font-black text-white">What would you recommend?</h2>
-                      <p className="text-sm font-semibold text-slate-400">{aiStatus}</p>
-                    </div>
-                    <p className="text-sm font-black text-cyan-300">
-                      Showing top {Math.min(3, rankedVehicles.length)} · {answeredCount} optional signals used
-                    </p>
+                <section className="grid scroll-mt-28 gap-4" ref={resultsRef}>
+                  <div className="sr-only">
+                    <h2>Recommendation</h2>
+                    <p>{aiStatus}</p>
                   </div>
-
-                  {confirmedProfileConversion ? (
-                    <PreferencesUsedPanel conversion={confirmedProfileConversion} onAdjust={adjustConfirmedProfile} />
-                  ) : null}
 
                   {hasNoMatch ? (
                     <NoMatchPanel
@@ -672,7 +833,6 @@ export function BuyerProfilePlanner() {
                       decisionSet={recommendationDecisionSet}
                       onAdjust={adjustConfirmedProfile}
                       profile={resultProfile}
-                      reasons={noMatchReasons}
                     />
                   ) : (
                     <VisibleIntelligenceResults
@@ -684,6 +844,17 @@ export function BuyerProfilePlanner() {
                       rankedVehicles={rankedVehicles}
                     />
                   )}
+
+                  {confirmedProfileConversion ? (
+                    <PreferencesUsedPanel conversion={confirmedProfileConversion} onAdjust={adjustConfirmedProfile} />
+                  ) : null}
+
+                  <AdvisorRefinementPanel
+                    isRunning={isInterpretingPreference || isSearching}
+                    onChange={setAdvisorFollowUpText}
+                    onSubmit={startAdvisorFollowUp}
+                    value={advisorFollowUpText}
+                  />
                 </section>
 
                 <FineTuneDetailsPanel
@@ -714,7 +885,16 @@ export function BuyerProfilePlanner() {
         ) : null}
 
         {activeView === "compare" ? (
-          <ComparisonView decisionReport={decisionReport} decisionSet={recommendationDecisionSet} profile={resultProfile} vehicles={comparedVehicles} />
+          searchSnapshot ? (
+            <ComparisonView decisionReport={decisionReport} decisionSet={recommendationDecisionSet} profile={resultProfile} vehicles={comparedVehicles} />
+          ) : (
+            <section className="rounded-lg border border-white/10 bg-white/[0.035] p-5">
+              <h2 className="text-2xl font-black text-white">Comparison</h2>
+              <p className="mt-2 text-sm font-semibold leading-6 text-slate-400">
+                Confirm preferences in Advisor first. I won’t show comparison vehicles until they belong to the current search.
+              </p>
+            </section>
+          )
         ) : null}
 
         {activeView === "advanced" ? (
@@ -731,7 +911,7 @@ export function BuyerProfilePlanner() {
 
             <section className="grid gap-4 rounded-lg border border-white/10 bg-white/[0.055] p-4 shadow-[0_24px_80px_rgba(0,0,0,0.28)] backdrop-blur">
               <div>
-                <h2 className="text-xl font-black text-white">What influenced this decision?</h2>
+                <h2 className="text-xl font-black text-white">Scoring Weights</h2>
                 <p className="text-sm font-semibold text-slate-400">
                   Adjust how much each factor matters. I’ll keep the percentages balanced.
                 </p>
@@ -796,6 +976,7 @@ function StageProgress({ stage }: { stage: AdvisorStage }) {
 
 function ConversationStarter({
   approvedDraft,
+  baseProfile,
   hasResults,
   intakeSession,
   isLoading,
@@ -813,6 +994,7 @@ function ConversationStarter({
   value,
 }: {
   approvedDraft: ConfirmedPreferenceProfile | null;
+  baseProfile: BuyerProfile;
   hasResults: boolean;
   intakeSession: ConversationIntakeSession | null;
   isLoading: boolean;
@@ -837,7 +1019,7 @@ function ConversationStarter({
       {showCompactOpening ? (
         <div className="flex flex-col gap-3 p-4 md:flex-row md:items-center md:justify-between md:p-5">
           <div>
-            <p className="text-xs font-black uppercase tracking-[0.16em] text-cyan-300">What did you hear from me?</p>
+            <p className="text-xs font-black uppercase tracking-[0.16em] text-cyan-300">Request</p>
             <p className="mt-1 max-w-4xl text-sm font-bold leading-6 text-slate-200">{value}</p>
           </div>
           <button
@@ -852,9 +1034,9 @@ function ConversationStarter({
         <div className="grid gap-6 p-5 md:p-8 lg:grid-cols-[minmax(0,1.08fr)_minmax(280px,0.92fr)] lg:items-end">
           <div className="grid gap-5">
             <div>
-              <p className="text-xs font-black uppercase tracking-[0.18em] text-cyan-300">Where should I start?</p>
+              <p className="text-xs font-black uppercase tracking-[0.18em] text-cyan-300">Advisor Intake</p>
               <h2 className="mt-3 max-w-4xl text-3xl font-black leading-tight tracking-tight text-white md:text-5xl">
-                What kind of car are you hoping to find?
+                Car Search
               </h2>
               <p className="mt-4 max-w-2xl text-base font-semibold leading-7 text-slate-300 md:text-lg">
                 You can be specific, uncertain, practical, or emotional. Start with what matters to you.
@@ -879,7 +1061,7 @@ function ConversationStarter({
                 onClick={onStart}
                 type="button"
               >
-                {isLoading ? "Listening carefully" : "Talk to my advisor"}
+                {isLoading ? "Processing" : "Start Advisor"}
               </button>
               {message ? (
                 <p aria-live="polite" className="rounded-lg border border-cyan-200/15 bg-cyan-200/[0.07] px-3 py-2 text-sm font-bold leading-6 text-cyan-50">
@@ -892,7 +1074,7 @@ function ConversationStarter({
           </div>
 
           <div className="rounded-lg border border-white/10 bg-slate-950/35 p-4">
-            <p className="text-xs font-black uppercase tracking-[0.14em] text-slate-400">What could I say?</p>
+            <p className="text-xs font-black uppercase tracking-[0.14em] text-slate-400">Examples</p>
             <div className="mt-3 flex flex-wrap gap-2">
               {prompts.map((prompt) => (
                 <button
@@ -912,6 +1094,7 @@ function ConversationStarter({
         <div className="border-t border-white/10 p-5 md:p-8">
           <PreferenceInterpretationPanel
             approvedDraft={approvedDraft}
+            baseProfile={baseProfile}
             onAnswerQuestion={onAnswerQuestion}
             onApproveDraft={onApproveDraft}
             onAskAnotherQuestion={onAskAnotherQuestion}
@@ -931,14 +1114,14 @@ function PreferencesUsedPanel({ conversion, onAdjust }: { conversion: ConfirmedP
   const visibleWarnings = [...conversion.mappingLimitations, ...conversion.conversionWarnings].slice(0, 4);
 
   return (
-    <details className="group rounded-lg border border-cyan-200/15 bg-cyan-200/[0.055] p-4 md:p-5">
-      <summary className="flex min-h-12 cursor-pointer list-none flex-col gap-3 md:flex-row md:items-center md:justify-between">
+    <details className="group rounded-lg border border-white/10 bg-white/[0.025] p-3 md:p-4">
+      <summary className="flex min-h-11 cursor-pointer list-none flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <div>
-          <p className="text-xs font-black uppercase tracking-[0.16em] text-cyan-200">What did you use?</p>
-          <h3 className="mt-1 text-xl font-black text-white">What did you use for this recommendation?</h3>
+          <p className="text-[0.68rem] font-black uppercase tracking-[0.16em] text-slate-500">Inputs</p>
+          <h3 className="mt-1 text-base font-black text-slate-100">Applied Preferences</h3>
         </div>
         <button
-          className="min-h-10 rounded-lg border border-white/10 bg-slate-950/35 px-4 text-sm font-black text-slate-200 transition hover:border-cyan-300/50 hover:bg-cyan-300/10"
+          className="min-h-9 rounded-lg border border-white/10 bg-slate-950/35 px-3 text-xs font-black text-slate-300 transition hover:border-cyan-300/50 hover:bg-cyan-300/10"
           onClick={(event) => {
             event.preventDefault();
             onAdjust();
@@ -950,15 +1133,16 @@ function PreferencesUsedPanel({ conversion, onAdjust }: { conversion: ConfirmedP
       </summary>
 
       <div className="mt-4 grid gap-3 border-t border-white/10 pt-4 lg:grid-cols-2">
-        <ConversionList emptyText="No approved hard requirements were added." items={conversion.appliedHardConstraints} title="What requirements did I confirm?" />
-        <ConversionList emptyText="No soft preferences were applied." items={strongestPreferences} title="What mattered most?" />
-        <ConversionList emptyText="No important defaults were disclosed." items={conversion.preservedDefaults} title="What did I assume?" />
-        <ConversionList emptyText="No unresolved fields remained." items={conversion.unresolvedFields} title="What still needs an answer?" />
+        <ConversionList emptyText="No approved hard requirements were added." items={conversion.appliedHardConstraints} title="Requirements" />
+        <ConversionList emptyText="No soft preferences were applied." items={strongestPreferences} title="Priorities" />
+        <ConversionList emptyText="No extra advisor context was preserved." items={conversion.preservedSemanticPreferences} title="Understood Context" />
+        <ConversionList emptyText="No important defaults were disclosed." items={conversion.preservedDefaults} title="Assumptions" />
+        <ConversionList emptyText="No unresolved fields remained." items={conversion.unresolvedFields} title="Open Items" />
       </div>
 
       {visibleWarnings.length ? (
-        <div className="mt-4 rounded-lg border border-amber-300/20 bg-amber-300/[0.08] p-4">
-          <p className="text-sm font-black text-amber-50">What did you need to translate?</p>
+        <div className="mt-4 rounded-lg border border-amber-300/20 bg-amber-300/[0.08] p-3">
+          <p className="text-sm font-black text-amber-50">Translation Notes</p>
           <ul className="mt-2 grid gap-1 text-sm font-semibold leading-6 text-amber-50/85">
             {visibleWarnings.map((warning) => (
               <li key={warning}>{warning}</li>
@@ -1022,8 +1206,8 @@ function FineTuneDetailsPanel({
     >
       <summary className="flex min-h-12 cursor-pointer list-none flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <div>
-          <p className="text-xs font-black uppercase tracking-[0.16em] text-slate-500">Want to adjust anything?</p>
-          <h2 className="mt-1 text-xl font-black text-white">Adjust the details</h2>
+          <p className="text-xs font-black uppercase tracking-[0.16em] text-slate-500">Preferences</p>
+          <h2 className="mt-1 text-xl font-black text-white">Preference Controls</h2>
           <p className="mt-1 text-sm font-semibold leading-6 text-slate-400">
             Use these controls when you want precise limits or want to correct what the advisor understood.
           </p>
@@ -1037,7 +1221,7 @@ function FineTuneDetailsPanel({
         <section className="grid gap-3 rounded-lg border border-cyan-200/15 bg-cyan-200/[0.055] p-4">
           <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
             <div>
-              <p className="text-xs font-black uppercase tracking-[0.14em] text-cyan-200">Where did these preferences come from?</p>
+              <p className="text-xs font-black uppercase tracking-[0.14em] text-cyan-200">Preference Source</p>
               <p className="mt-1 text-lg font-black text-white">{profileSourceLabel}</p>
               <p className="mt-1 text-sm font-semibold leading-6 text-slate-300">
                 Last preference update in this session: {lastProfileUpdateSequence ? `#${lastProfileUpdateSequence}` : "not applied yet"}.
@@ -1071,7 +1255,7 @@ function FineTuneDetailsPanel({
           ) : null}
           {conflictNotes.length ? (
             <div className="rounded-lg border border-sky-300/20 bg-sky-300/[0.08] p-3">
-              <p className="text-sm font-black text-sky-50">What did my edit override?</p>
+              <p className="text-sm font-black text-sky-50">Manual Overrides</p>
               <ul className="mt-1 grid gap-1 text-sm font-semibold leading-6 text-sky-50/85">
                 {conflictNotes.map((note) => (
                   <li key={note}>{note}</li>
@@ -1082,7 +1266,7 @@ function FineTuneDetailsPanel({
         </section>
 
         <div className="grid gap-4 xl:grid-cols-2">
-          <QuestionGroup title="What can I afford?">
+          <QuestionGroup title="Budget">
             <NumberField label="Purchase budget" meta={metadata.maxPurchaseBudget} field="maxPurchaseBudget" step={500} profile={profile} setProfile={(next) => update("maxPurchaseBudget", next)} />
             <NumberField label="Monthly budget" meta={metadata.monthlyBudget} field="monthlyBudget" step={25} profile={profile} setProfile={(next) => update("monthlyBudget", next)} />
             <NumberField label="Down payment" meta={metadata.downPayment} field="downPayment" step={100} profile={profile} setProfile={(next) => update("downPayment", next)} />
@@ -1101,7 +1285,7 @@ function FineTuneDetailsPanel({
             <NumberField label="Annual mileage" meta={metadata.expectedAnnualMileage} field="expectedAnnualMileage" step={500} profile={profile} setProfile={(next) => update("expectedAnnualMileage", next)} />
           </QuestionGroup>
 
-          <QuestionGroup title="How will I use the car?">
+          <QuestionGroup title="Usage">
             <NumberField label="Family size" meta={metadata.familySize} field="familySize" step={1} profile={profile} setProfile={(next) => update("familySize", next)} />
             <SelectField
               label="Cargo"
@@ -1129,7 +1313,7 @@ function FineTuneDetailsPanel({
             />
           </QuestionGroup>
 
-          <QuestionGroup title="What kind of car do I want?">
+          <QuestionGroup title="Vehicle Preferences">
             <MakePreferenceField
               makeValue={makeValue}
               metadata={metadata.requiredMake || metadata.preferredMake}
@@ -1203,7 +1387,7 @@ function FineTuneDetailsPanel({
             <RangeField label="Performance" meta={metadata.performanceImportance} field="performanceImportance" profile={profile} setProfile={(next) => update("performanceImportance", next)} />
           </QuestionGroup>
 
-          <QuestionGroup title="What risks matter most?">
+          <QuestionGroup title="Risk Priorities">
             <RangeField label="Reliability" meta={metadata.reliabilityImportance} field="reliabilityImportance" profile={profile} setProfile={(next) => update("reliabilityImportance", next)} />
             <NumberField label="Reliability minimum" meta={metadata.reliabilityMinimum} field="reliabilityMinimum" step={1} profile={profile} setProfile={(next) => update("reliabilityMinimum", next)} />
             <SelectField
@@ -1231,7 +1415,7 @@ function FineTuneDetailsPanel({
             onClick={onApply}
             type="button"
           >
-            {isRunning ? "Updating recommendation" : "Update my recommendation"}
+            {isRunning ? "Updating recommendation" : "Update Recommendation"}
           </button>
           <p className="text-sm font-semibold leading-6 text-slate-400">
             Changes wait here until you choose to update, so the current recommendation stays stable.
@@ -1273,6 +1457,7 @@ function ConversionList({
 
 function PreferenceInterpretationPanel({
   approvedDraft,
+  baseProfile,
   isRecommendationRunning,
   onAnswerQuestion,
   onApproveDraft,
@@ -1282,6 +1467,7 @@ function PreferenceInterpretationPanel({
   session,
 }: {
   approvedDraft: ConfirmedPreferenceProfile | null;
+  baseProfile: BuyerProfile;
   isRecommendationRunning: boolean;
   onAnswerQuestion: (answer: string) => void;
   onApproveDraft: (draft: ConfirmedPreferenceProfile) => Promise<void> | void;
@@ -1291,29 +1477,33 @@ function PreferenceInterpretationPanel({
   session: ConversationIntakeSession;
 }) {
   const [showAnswerInput, setShowAnswerInput] = useState(false);
-  const [showStructuredReview, setShowStructuredReview] = useState(false);
   const [answer, setAnswer] = useState("");
   const [confirmationDraft, setConfirmationDraft] = useState<ConfirmedPreferenceProfile>(() =>
-    createConfirmedPreferenceProfile(session, defaultProfile),
+    createConfirmedPreferenceProfile(session, baseProfile),
   );
   const draftToPreserveRef = useRef<ConfirmedPreferenceProfile | null>(null);
-  const interpretation = session.accumulatedInterpretation;
   const conciseUnderstanding = getConciseUnderstanding(session);
   const latestAdvisorTurn = getLatestAdvisorTurn(session);
   const firstConflict = conciseUnderstanding.activeConflict;
   const firstUncertainty = conciseUnderstanding.remainingUncertainty;
   const currentQuestion = session.currentQuestion;
+  const latestUserText = [...session.conversationTurns].reverse().find((turn) => turn.role === "user")?.text || "";
+  const outOfScopeMessage = getOutOfScopeAdvisorMessage(latestUserText);
+  const terminalCatalogNoMatch = assessCatalogIntentFeasibility(
+    session.accumulatedInterpretation.suggestedProfileUpdates,
+    vehicleCatalog,
+  ).terminalNoMatch;
   const advisorContinuityMessage =
-    latestAdvisorTurn && session.conversationTurns.length > 2
+    latestAdvisorTurn && currentQuestion && session.conversationTurns.length > 2
       ? latestAdvisorTurn.text.replace(currentQuestion?.text || "", "").trim()
       : "";
 
   useEffect(() => {
-    const nextDraft = createConfirmedPreferenceProfile(session, defaultProfile);
+    const nextDraft = createConfirmedPreferenceProfile(session, baseProfile);
     const preservedDraft = draftToPreserveRef.current;
     draftToPreserveRef.current = null;
     setConfirmationDraft(preservedDraft ? carryForwardConfirmedPreferenceDraft(nextDraft, preservedDraft) : nextDraft);
-  }, [session]);
+  }, [baseProfile, session]);
 
   function continueConversation() {
     if (!answer.trim()) return;
@@ -1343,9 +1533,23 @@ function PreferenceInterpretationPanel({
   return (
     <section className="grid gap-5 rounded-lg border border-cyan-200/15 bg-slate-950/35 p-4 md:p-5">
       <div className="grid gap-2">
-        <p className="text-xs font-black uppercase tracking-[0.16em] text-cyan-300">What I heard</p>
-        <h3 className="text-2xl font-black tracking-tight text-white">Did I understand you correctly?</h3>
-        <p className="max-w-3xl text-sm font-semibold leading-6 text-slate-300">{interpretation.interpretationSummary}</p>
+        <p className="text-xs font-black uppercase tracking-[0.16em] text-cyan-300">
+          {outOfScopeMessage ? "Current scope" : currentQuestion ? "Conversation" : "Final check"}
+        </p>
+        <h3 className="text-2xl font-black tracking-tight text-white">
+          {outOfScopeMessage
+            ? "This request is outside the current car catalog."
+            : currentQuestion
+              ? "Let me understand one thing first."
+              : "Here’s what I’ll use."}
+        </h3>
+        <p className="max-w-3xl text-sm font-semibold leading-6 text-slate-300">
+          {outOfScopeMessage
+            ? outOfScopeMessage
+            : currentQuestion
+            ? "I’m keeping the setup simple and asking only what would change the recommendation most."
+            : "Before I look for cars, check this summary once so I don’t turn a misunderstanding into a recommendation."}
+        </p>
         {advisorContinuityMessage ? (
           <p className="max-w-3xl rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-sm font-bold leading-6 text-slate-200">
             {advisorContinuityMessage}
@@ -1353,79 +1557,46 @@ function PreferenceInterpretationPanel({
         ) : null}
       </div>
 
-      <div className="grid gap-3 lg:grid-cols-2">
-        <InterpretationList
-          emptyText="No exact facts yet. The next question will help make this concrete."
-          items={conciseUnderstanding.confirmedFacts.map((fact) => ({
-            title: fact.label,
-            body: fact.value,
-            evidence: fact.evidencePhrase,
-          }))}
-          title="What did you understand?"
-        />
-        <InterpretationList
-          emptyText="No strong inferred preferences yet."
-          items={conciseUnderstanding.strongPreferences.map((preference) => ({
-            title: preference.label,
-            body: preference.value,
-            evidence: preference.evidencePhrase,
-          }))}
-          title="What am I reading between the lines?"
-        />
-      </div>
-
-      {firstConflict ? (
+      {!outOfScopeMessage && firstConflict ? (
         <div className="rounded-lg border border-amber-300/20 bg-amber-300/[0.07] p-4">
-          <p className="text-xs font-black uppercase tracking-[0.14em] text-amber-200">What might conflict?</p>
+          <p className="text-xs font-black uppercase tracking-[0.14em] text-amber-200">One thing to resolve</p>
           <p className="mt-2 text-sm font-bold leading-6 text-amber-50">{firstConflict.description}</p>
         </div>
       ) : null}
 
-      {firstUncertainty ? (
+      {!outOfScopeMessage && firstUncertainty ? (
         <div className="rounded-lg border border-white/10 bg-white/[0.04] p-4">
-          <p className="text-xs font-black uppercase tracking-[0.14em] text-slate-400">What am I not sure about?</p>
+          <p className="text-xs font-black uppercase tracking-[0.14em] text-slate-400">What I’m still unsure about</p>
           <p className="mt-2 text-sm font-bold leading-6 text-slate-200">{firstUncertainty.question}</p>
         </div>
       ) : null}
 
-      <div className="rounded-lg border border-cyan-200/15 bg-cyan-200/[0.06] p-4">
-        <p className="text-xs font-black uppercase tracking-[0.14em] text-cyan-200">
-          {currentQuestion ? "What should I ask next?" : "Does this look right?"}
-        </p>
-        <p className="mt-2 text-base font-black leading-7 text-white">
-          {currentQuestion ? currentQuestion.text : "I think I understand enough to summarize what you’re looking for."}
-        </p>
-        <p className="mt-2 text-xs font-bold uppercase tracking-[0.12em] text-cyan-100/70">
-          How sure are you so far? {session.interpretationConfidence}
-        </p>
-      </div>
+      {!outOfScopeMessage && currentQuestion ? (
+        <div className="rounded-lg border border-cyan-200/15 bg-cyan-200/[0.06] p-4">
+          <p className="text-xs font-black uppercase tracking-[0.14em] text-cyan-200">Next question</p>
+          <p className="mt-2 text-base font-black leading-7 text-white">{currentQuestion.text}</p>
+        </div>
+      ) : null}
 
       <div className="flex flex-col gap-2 sm:flex-row">
-        {currentQuestion ? (
+        {!outOfScopeMessage && currentQuestion ? (
           <>
             <button
               className="min-h-11 rounded-lg border border-cyan-300/40 bg-cyan-300 px-4 text-sm font-black text-slate-950 transition hover:bg-cyan-200"
               onClick={() => setShowAnswerInput((current) => !current)}
               type="button"
             >
-              Answer the question
+              Answer
             </button>
             <button
               className="min-h-11 rounded-lg border border-white/10 bg-white/[0.05] px-4 text-sm font-black text-slate-200 transition hover:border-cyan-300/50 hover:bg-cyan-300/10"
               onClick={skipQuestion}
               type="button"
             >
-              Skip this question
+              Skip
             </button>
           </>
         ) : null}
-        <button
-          className="min-h-11 rounded-lg border border-white/10 bg-white/[0.05] px-4 text-sm font-black text-slate-200 transition hover:border-cyan-300/50 hover:bg-cyan-300/10"
-          onClick={() => setShowStructuredReview((current) => !current)}
-          type="button"
-        >
-          {showStructuredReview ? "Keep editing" : "Review what you understood"}
-        </button>
         <button
           className="min-h-11 rounded-lg border border-white/10 bg-transparent px-4 text-sm font-black text-slate-400 transition hover:border-white/30 hover:text-slate-100"
           onClick={onStartOver}
@@ -1435,7 +1606,7 @@ function PreferenceInterpretationPanel({
         </button>
       </div>
 
-      {showAnswerInput && currentQuestion ? (
+      {!outOfScopeMessage && showAnswerInput && currentQuestion ? (
         <label className="grid gap-2 text-sm font-black text-slate-200" htmlFor="clarifying-answer">
           <span>{currentQuestion.text}</span>
           <textarea
@@ -1459,21 +1630,21 @@ function PreferenceInterpretationPanel({
               onClick={skipQuestion}
               type="button"
             >
-              Skip this question
+              Skip
             </button>
           </div>
         </label>
       ) : null}
 
-      {showStructuredReview ? (
+      {!outOfScopeMessage && !currentQuestion ? (
         <ConfirmationProfilePanel
           approvedDraft={approvedDraft}
           draft={confirmationDraft}
           isRecommendationRunning={isRecommendationRunning}
+          terminalCatalogNoMatch={terminalCatalogNoMatch}
           onApprove={approveDraft}
           onAskAnotherQuestion={askAnotherQuestion}
           onChangeDraft={setConfirmationDraft}
-          onKeepEditing={() => setShowStructuredReview(false)}
           onStartOver={onStartOver}
         />
       ) : null}
@@ -1481,57 +1652,30 @@ function PreferenceInterpretationPanel({
   );
 }
 
-function InterpretationList({
-  emptyText,
-  items,
-  title,
-}: {
-  emptyText: string;
-  items: Array<{ title: string; body: string; evidence: string }>;
-  title: string;
-}) {
-  return (
-    <div className="rounded-lg border border-white/10 bg-white/[0.035] p-4">
-      <h4 className="text-sm font-black text-white">{title}</h4>
-      {items.length ? (
-        <ul className="mt-3 grid gap-3">
-          {items.map((item) => (
-            <li className="grid gap-1 text-sm leading-6" key={`${item.title}-${item.evidence}`}>
-              <span className="font-black text-slate-100">{item.title}</span>
-              <span className="font-semibold text-slate-300">{item.body}</span>
-              {item.evidence ? <span className="text-xs font-bold text-slate-500">Evidence: &quot;{item.evidence}&quot;</span> : null}
-            </li>
-          ))}
-        </ul>
-      ) : (
-        <p className="mt-3 text-sm font-semibold leading-6 text-slate-400">{emptyText}</p>
-      )}
-    </div>
-  );
-}
-
 function ConfirmationProfilePanel({
   approvedDraft,
   draft,
   isRecommendationRunning,
+  terminalCatalogNoMatch,
   onApprove,
   onAskAnotherQuestion,
   onChangeDraft,
-  onKeepEditing,
   onStartOver,
 }: {
   approvedDraft: ConfirmedPreferenceProfile | null;
   draft: ConfirmedPreferenceProfile;
   isRecommendationRunning: boolean;
+  terminalCatalogNoMatch: boolean;
   onApprove: (draft: ConfirmedPreferenceProfile) => Promise<void> | void;
   onAskAnotherQuestion: () => void;
   onChangeDraft: (draft: ConfirmedPreferenceProfile) => void;
-  onKeepEditing: () => void;
   onStartOver: () => void;
 }) {
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
   const [editingValue, setEditingValue] = useState("");
-  const hasBlockingIssue = hasBlockingConfirmationIssue(draft);
+  const hasBlockingIssue = hasBlockingConfirmationIssue(draft) && !terminalCatalogNoMatch;
+  const readiness = assessConfirmedPreferenceDraftReadiness(draft);
+  const communication = buildConfirmationCommunicationViewModel(draft, readiness);
 
   function startEdit(item: ConfirmedPreferenceItem) {
     setEditingItemId(item.id);
@@ -1556,26 +1700,33 @@ function ConfirmationProfilePanel({
   return (
     <section className="grid gap-5 rounded-lg border border-white/10 bg-slate-950/50 p-4 md:p-5">
       <div className="grid gap-2">
-        <p className="text-xs font-black uppercase tracking-[0.16em] text-cyan-300">Before I look for cars…</p>
-        <h3 className="text-2xl font-black tracking-tight text-white">Is this what you want me to use?</h3>
+        <p className="text-xs font-black uppercase tracking-[0.16em] text-cyan-300">One final summary</p>
+        <h3 className="text-2xl font-black tracking-tight text-white">Confirm your preferences</h3>
         <p className="max-w-3xl text-sm font-semibold leading-6 text-slate-300">
           Review this before I look for cars. You can correct anything I misunderstood.
         </p>
       </div>
 
       <div className="rounded-lg border border-cyan-200/15 bg-cyan-200/[0.06] p-4">
-        <p className="text-xs font-black uppercase tracking-[0.14em] text-cyan-200">Does this summary sound right?</p>
-        <p className="mt-2 text-sm font-bold leading-6 text-white">{draft.advisorSummary}</p>
+        <p className="text-xs font-black uppercase tracking-[0.14em] text-cyan-200">What I understood</p>
+        <p className="mt-2 text-sm font-bold leading-6 text-white">{communication.advisorSummary}</p>
       </div>
 
-      <div className="grid gap-4 xl:grid-cols-2">
-        {(["your_situation", "what_matters_most", "preferences_and_requirements", "uncertainty_and_tradeoffs"] as const).map((group) => (
-          <section className="grid gap-3 rounded-lg border border-white/10 bg-white/[0.035] p-4" key={group}>
-            <h4 className="text-sm font-black text-white">{confirmationGroupLabel(group)}</h4>
-            {getConfirmationItemsForGroup(draft, group).length ? (
-              <ul className="grid gap-3">
-                {getConfirmationItemsForGroup(draft, group).map((item) => (
-                  <li className="grid gap-3 rounded-lg border border-white/10 bg-slate-950/35 p-3" key={item.id}>
+      <ConfirmationPolicySummary summary={communication.policySummary} />
+
+      <details className="group rounded-lg border border-white/10 bg-white/[0.025] p-3">
+        <summary className="flex min-h-10 cursor-pointer list-none items-center justify-between gap-3">
+          <span className="text-sm font-black text-slate-200">Review or correct individual details</span>
+          <span className="grid h-7 w-7 place-items-center rounded-full border border-white/10 text-sm font-black text-cyan-200 transition group-open:rotate-45">+</span>
+        </summary>
+        <div className="mt-4 grid gap-4 border-t border-white/10 pt-4 xl:grid-cols-2">
+          {(["your_situation", "what_matters_most", "preferences_and_requirements", "uncertainty_and_tradeoffs"] as const).map((group) => (
+            <section className="grid gap-3 rounded-lg border border-white/10 bg-white/[0.035] p-4" key={group}>
+              <h4 className="text-sm font-black text-white">{confirmationGroupLabel(group)}</h4>
+              {getConfirmationItemsForGroup(draft, group).length ? (
+                <ul className="grid gap-3">
+                  {getConfirmationItemsForGroup(draft, group).map((item) => (
+                    <li className="grid gap-3 rounded-lg border border-white/10 bg-slate-950/35 p-3" key={item.id}>
                     <div className="grid gap-1">
                       <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
                         <div>
@@ -1584,13 +1735,21 @@ function ConfirmationProfilePanel({
                         </div>
                         <div className="flex flex-wrap gap-2">
                           <StatusBadge certainty={item.certainty} />
-                          <span className="rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-xs font-black uppercase tracking-[0.08em] text-slate-300">
-                            {item.constraintStrength}
-                          </span>
+                          <RecommendationSupportBadge support={item.recommendationSupport} />
+                          {!item.policyDimension ? (
+                            <span className="rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-xs font-black uppercase tracking-[0.08em] text-slate-300">
+                              {item.constraintStrength}
+                            </span>
+                          ) : null}
                         </div>
                       </div>
                       {item.evidencePhrase ? (
                         <p className="text-xs font-bold text-slate-500">Evidence: &quot;{item.evidencePhrase}&quot;</p>
+                      ) : null}
+                      {item.recommendationSupport === "understood_not_ranked" ? (
+                        <p className="text-xs font-bold leading-5 text-slate-400">
+                          I understood this and will keep it in view, but the current car data cannot compare it reliably yet.
+                        </p>
                       ) : null}
                     </div>
 
@@ -1621,20 +1780,13 @@ function ConfirmationProfilePanel({
                       </div>
                     ) : (
                       <div className="flex flex-wrap gap-2">
-                        <button
-                          className="min-h-9 rounded-lg border border-white/10 bg-white/[0.05] px-3 text-xs font-black text-slate-200 transition hover:border-cyan-300/50 hover:bg-cyan-300/10"
-                          onClick={() => startEdit(item)}
-                          type="button"
-                        >
-                          Change
-                        </button>
-                        {item.certainty !== "confirmed" ? (
+                        {!item.policyDimension ? (
                           <button
-                            className="min-h-9 rounded-lg border border-cyan-300/30 bg-cyan-300/10 px-3 text-xs font-black text-cyan-100 transition hover:bg-cyan-300/20"
-                            onClick={() => onChangeDraft(confirmPreferenceItem(draft, item.id))}
+                            className="min-h-9 rounded-lg border border-white/10 bg-white/[0.05] px-3 text-xs font-black text-slate-200 transition hover:border-cyan-300/50 hover:bg-cyan-300/10"
+                            onClick={() => startEdit(item)}
                             type="button"
                           >
-                            Confirm
+                            Change
                           </button>
                         ) : null}
                         {item.canRemove ? (
@@ -1646,7 +1798,7 @@ function ConfirmationProfilePanel({
                             Remove
                           </button>
                         ) : null}
-                        {item.group === "preferences_and_requirements" || item.field === "maxPurchaseBudget" || item.field === "drivetrainPreference" ? (
+                        {!item.policyDimension && (item.group === "preferences_and_requirements" || item.field === "maxPurchaseBudget" || item.field === "drivetrainPreference") ? (
                           <ConstraintButtons
                             item={item}
                             onChange={(constraintStrength) =>
@@ -1656,15 +1808,16 @@ function ConfirmationProfilePanel({
                         ) : null}
                       </div>
                     )}
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <p className="text-sm font-semibold leading-6 text-slate-400">Nothing in this group yet.</p>
-            )}
-          </section>
-        ))}
-      </div>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="text-sm font-semibold leading-6 text-slate-400">Nothing in this group yet.</p>
+              )}
+            </section>
+          ))}
+        </div>
+      </details>
 
       {approvedDraft?.userApproved ? (
         <div className="rounded-lg border border-emerald-300/25 bg-emerald-300/[0.08] p-4">
@@ -1680,29 +1833,46 @@ function ConfirmationProfilePanel({
         </div>
       ) : null}
 
+      {!hasBlockingIssue && !readiness.ready ? (
+        <div className="rounded-lg border border-amber-300/25 bg-amber-300/[0.08] p-4">
+          <p className="text-sm font-black text-amber-50">Let’s narrow it down together.</p>
+          <p className="mt-1 text-sm font-bold leading-6 text-amber-50/90">{communication.readinessMessage}</p>
+          {readiness.preservedContext.length ? (
+            <p className="mt-2 text-xs font-bold leading-5 text-amber-50/75">
+              I’ll preserve {readiness.preservedContext.map((item) => item.label.toLowerCase()).join(", ")}, but today&apos;s ranking cannot score it directly.
+            </p>
+          ) : null}
+        </div>
+      ) : null}
+
       <div className="flex flex-col gap-2 sm:flex-row">
-        <button
-          className="min-h-11 rounded-lg border border-cyan-300/40 bg-cyan-300 px-4 text-sm font-black text-slate-950 transition hover:bg-cyan-200 disabled:cursor-not-allowed disabled:border-white/10 disabled:bg-white/[0.05] disabled:text-slate-500"
-          disabled={hasBlockingIssue || isRecommendationRunning}
-          onClick={() => onApprove(draft)}
-          type="button"
-        >
-          {isRecommendationRunning ? "Checking cars" : "Confirm and find cars"}
-        </button>
-        <button
-          className="min-h-11 rounded-lg border border-white/10 bg-white/[0.05] px-4 text-sm font-black text-slate-200 transition hover:border-cyan-300/50 hover:bg-cyan-300/10"
-          onClick={onKeepEditing}
-          type="button"
-        >
-          Keep editing
-        </button>
-        <button
-          className="min-h-11 rounded-lg border border-white/10 bg-white/[0.05] px-4 text-sm font-black text-slate-200 transition hover:border-cyan-300/50 hover:bg-cyan-300/10"
-          onClick={onAskAnotherQuestion}
-          type="button"
-        >
-          Ask me another question
-        </button>
+        {!hasBlockingIssue && readiness.ready ? (
+          <button
+            className="min-h-11 rounded-lg border border-cyan-300/40 bg-cyan-300 px-4 text-sm font-black text-slate-950 transition hover:bg-cyan-200 disabled:cursor-not-allowed disabled:border-white/10 disabled:bg-white/[0.05] disabled:text-slate-500"
+            disabled={isRecommendationRunning}
+            onClick={() => onApprove(draft)}
+            type="button"
+          >
+            {isRecommendationRunning ? "Checking cars" : "Find Cars"}
+          </button>
+        ) : (
+          <button
+            className="min-h-11 rounded-lg border border-cyan-300/40 bg-cyan-300 px-4 text-sm font-black text-slate-950 transition hover:bg-cyan-200"
+            onClick={onAskAnotherQuestion}
+            type="button"
+          >
+            Answer one more question
+          </button>
+        )}
+        {!hasBlockingIssue && readiness.ready ? (
+          <button
+            className="min-h-11 rounded-lg border border-white/10 bg-white/[0.05] px-4 text-sm font-black text-slate-200 transition hover:border-cyan-300/50 hover:bg-cyan-300/10"
+            onClick={onAskAnotherQuestion}
+            type="button"
+          >
+            Ask another question
+          </button>
+        ) : null}
         <button
           className="min-h-11 rounded-lg border border-white/10 bg-transparent px-4 text-sm font-black text-slate-400 transition hover:border-white/30 hover:text-slate-100"
           onClick={onStartOver}
@@ -1711,6 +1881,72 @@ function ConfirmationProfilePanel({
           Start over
         </button>
       </div>
+    </section>
+  );
+}
+
+function ConfirmationPolicySummary({ summary }: { summary: AdvisorPolicySummary }) {
+  const sections = [
+    { title: "What I’ll prioritize", items: summary.priorities },
+    { title: "Requirements", items: summary.requirements },
+    { title: "What I’ll leave flexible", items: summary.flexible },
+    { title: "What I won’t use", items: summary.ignored },
+    { title: "What I still need to know", items: summary.unresolved },
+    { title: "Understood, but not scored", items: summary.understoodNotScored },
+  ].filter((section) => section.items.length);
+
+  return (
+    <div className="grid gap-3 md:grid-cols-2">
+      {sections.map((section) => (
+        <section className="rounded-lg border border-white/10 bg-white/[0.035] p-4" key={section.title}>
+          <h4 className="text-sm font-black text-white">{section.title}</h4>
+          <ul className="mt-2 grid gap-1 text-sm font-semibold leading-6 text-slate-300">
+            {section.items.map((item) => (
+              <li key={item}>{item}</li>
+            ))}
+          </ul>
+        </section>
+      ))}
+    </div>
+  );
+}
+
+function AdvisorRefinementPanel({
+  isRunning,
+  onChange,
+  onSubmit,
+  value,
+}: {
+  isRunning: boolean;
+  onChange: (value: string) => void;
+  onSubmit: () => void;
+  value: string;
+}) {
+  return (
+    <section className="rounded-lg border border-cyan-200/15 bg-cyan-200/[0.04] p-4 md:p-5">
+      <p className="text-xs font-black uppercase tracking-[0.14em] text-cyan-200">Adjust the recommendation</p>
+      <h3 className="mt-1 text-lg font-black text-white">Tell me what you want to change.</h3>
+      <p className="mt-2 text-sm font-semibold leading-6 text-slate-300">
+        I’ll keep the preferences you already confirmed and update only what your follow-up changes.
+      </p>
+      <label className="mt-4 grid gap-2" htmlFor="advisor-follow-up">
+        <span className="sr-only">Describe a change to the current recommendation</span>
+        <textarea
+          className="min-h-24 resize-y rounded-lg border border-white/10 bg-slate-950/55 px-3 py-3 text-sm font-semibold leading-6 text-white outline-none transition placeholder:text-slate-500 focus:border-cyan-300/80 focus:ring-4 focus:ring-cyan-300/15"
+          id="advisor-follow-up"
+          onChange={(event) => onChange(event.target.value)}
+          placeholder="Make safety less important, use a $30,000 limit, or show me something faster..."
+          value={value}
+        />
+      </label>
+      <button
+        className="mt-3 min-h-11 rounded-lg border border-cyan-300/40 bg-cyan-300 px-4 text-sm font-black text-slate-950 transition hover:bg-cyan-200 disabled:cursor-not-allowed disabled:border-white/10 disabled:bg-white/[0.05] disabled:text-slate-500"
+        disabled={!value.trim() || isRunning}
+        onClick={onSubmit}
+        type="button"
+      >
+        {isRunning ? "Updating" : "Update my recommendation"}
+      </button>
     </section>
   );
 }
@@ -1736,14 +1972,28 @@ function ConstraintButtons({ item, onChange }: { item: ConfirmedPreferenceItem; 
 
 function StatusBadge({ certainty }: { certainty: ConfirmationCertainty }) {
   const labels: Record<ConfirmationCertainty, string> = {
-    confirmed: "Confirmed",
-    inferred: "Inferred",
-    needs_answer: "Needs an answer",
-    assumed_default: "Assumed default",
+    confirmed: "User provided",
+    inferred: "Please review",
+    needs_answer: "Still open",
+    assumed_default: "Working assumption",
   };
   return (
     <span className="rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-xs font-black uppercase tracking-[0.08em] text-slate-200">
       {labels[certainty]}
+    </span>
+  );
+}
+
+function RecommendationSupportBadge({ support }: { support: ConfirmedPreferenceItem["recommendationSupport"] }) {
+  const label = support === "used_in_recommendation" ? "Affects the search" : "Remembered context";
+  const className =
+    support === "used_in_recommendation"
+      ? "border-emerald-300/20 bg-emerald-300/[0.08] text-emerald-100"
+      : "border-amber-300/20 bg-amber-300/[0.08] text-amber-100";
+
+  return (
+    <span className={`rounded-full border px-2.5 py-1 text-xs font-black uppercase tracking-[0.08em] ${className}`}>
+      {label}
     </span>
   );
 }
@@ -1759,6 +2009,7 @@ function getConfirmationItemsForGroup(draft: ConfirmedPreferenceProfile, group: 
     displayValue: conflict.description,
     certainty: "needs_answer" as ConfirmationCertainty,
     constraintStrength: "flexible" as ConstraintStrength,
+    recommendationSupport: "understood_not_ranked",
     evidencePhrase: conflict.evidencePhrases.join(", "),
     userEdited: false,
     editableType: "text" as const,
@@ -1769,23 +2020,12 @@ function getConfirmationItemsForGroup(draft: ConfirmedPreferenceProfile, group: 
 
 function confirmationGroupLabel(group: ConfirmedPreferenceItem["group"]) {
   const labels: Record<ConfirmedPreferenceItem["group"], string> = {
-    your_situation: "What’s your situation?",
-    what_matters_most: "What matters most?",
-    preferences_and_requirements: "What preferences or requirements did I hear?",
-    uncertainty_and_tradeoffs: "What still feels uncertain?",
+    your_situation: "Situation",
+    what_matters_most: "Priorities",
+    preferences_and_requirements: "Preferences and Requirements",
+    uncertainty_and_tradeoffs: "Uncertainty",
   };
   return labels[group];
-}
-
-function StructuredReview({ title, value }: { title: string; value: unknown }) {
-  return (
-    <div>
-      <h4 className="text-xs font-black uppercase tracking-[0.14em] text-slate-400">{title}</h4>
-      <pre className="mt-2 max-h-52 overflow-auto rounded-lg border border-white/10 bg-black/25 p-3 text-xs leading-5 text-slate-300">
-        {JSON.stringify(value, null, 2)}
-      </pre>
-    </div>
-  );
 }
 
 function ComparisonView({
@@ -1803,7 +2043,7 @@ function ComparisonView({
     return (
       <section className="grid gap-4">
         <div>
-          <h2 className="text-2xl font-black text-white">How do these cars compare?</h2>
+          <h2 className="text-2xl font-black text-white">Comparison</h2>
           <p className="text-sm font-semibold text-slate-400">No match. There are no cars to compare under the current requirements.</p>
         </div>
         <NoMatchPanel decisionReport={decisionReport} decisionSet={decisionSet} profile={profile} />
@@ -1814,7 +2054,7 @@ function ComparisonView({
   return (
     <section className="grid gap-4">
       <div>
-        <h2 className="text-2xl font-black text-white">How do these cars compare?</h2>
+        <h2 className="text-2xl font-black text-white">Comparison</h2>
         <p className="text-sm font-semibold text-slate-400">
           Add cars from Advisor to compare, or review the top three matches by default.
         </p>
@@ -1870,33 +2110,40 @@ function NoMatchPanel({
   decisionSet,
   onAdjust,
   profile,
-  reasons = [],
 }: {
   decisionReport: ReturnType<typeof buildDecisionReport>;
   decisionSet: ReturnType<typeof getRecommendationDecisionSet>;
   onAdjust?: () => void;
   profile: BuyerProfile;
-  reasons?: string[];
 }) {
+  const communication = useMemo(
+    () => buildAdvisorCommunicationViewModel({ decisionReport, decisionSet, profile }),
+    [decisionReport, decisionSet, profile],
+  );
+
   return (
     <div className="grid gap-4">
       <section className="rounded-lg border border-amber-300/25 bg-amber-300/10 p-5 shadow-[0_24px_70px_rgba(0,0,0,0.22)]">
-        <p className="text-xs font-black uppercase tracking-[0.16em] text-amber-100">Here’s what I found</p>
-        <h3 className="mt-2 text-2xl font-black tracking-tight text-amber-50">I don’t have a responsible match yet.</h3>
+        <p className="text-xs font-black uppercase tracking-[0.16em] text-amber-100">Advisor</p>
+        <h3 className="mt-2 max-w-4xl text-2xl font-black tracking-tight text-amber-50">
+          {communication.advisorHeadline}
+        </h3>
         <p className="mt-3 max-w-3xl text-sm font-semibold leading-6 text-amber-50/85">
-          I’d rather show no recommendation than force a car that violates your selected requirements.
-          Relax one strict filter, then update the recommendation so the shortlist stays honest.
+          {communication.noMatch?.explanation}
         </p>
-        {reasons.length ? (
-          <div className="mt-5">
-            <h4 className="text-xs font-black uppercase tracking-[0.12em] text-amber-100/80">What blocked the match?</h4>
-            <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-3">
-              {reasons.map((reason) => (
-                <div className="rounded-lg border border-amber-200/15 bg-slate-950/30 px-3 py-2 text-sm font-bold text-amber-50" key={reason}>
-                  {reason}
-                </div>
-              ))}
-            </div>
+        <p className="mt-3 max-w-3xl text-sm font-bold leading-6 text-amber-50">
+          {communication.mainTradeoff}
+        </p>
+        {communication.noMatch?.actions.length ? (
+          <div className="mt-4 flex flex-wrap gap-2" aria-label="Possible next steps">
+            {communication.noMatch.actions.map((action) => (
+              <span
+                className="rounded-full border border-amber-100/20 bg-amber-100/[0.07] px-3 py-1.5 text-xs font-bold text-amber-50/85"
+                key={action}
+              >
+                {action}
+              </span>
+            ))}
           </div>
         ) : null}
         {onAdjust ? (
@@ -1909,7 +2156,22 @@ function NoMatchPanel({
           </button>
         ) : null}
       </section>
-      <AdvisorConversationPanel decisionReport={decisionReport} decisionSet={decisionSet} profile={profile} />
+      <details className="group rounded-lg border border-white/10 bg-white/[0.035] p-4">
+        <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-3">
+          <span className="text-sm font-black text-slate-200">Why no car qualified</span>
+          <span className="grid h-7 w-7 place-items-center rounded-full border border-white/10 text-sm font-black text-cyan-200 transition group-open:rotate-45">+</span>
+        </summary>
+        <div className="mt-4 grid gap-3 border-t border-white/10 pt-4">
+          {(communication.noMatch?.blockers || []).map((blocker) => (
+            <p className="rounded-lg border border-white/10 bg-slate-950/35 px-3 py-2 text-sm font-semibold leading-6 text-slate-300" key={blocker}>
+              {blocker}
+            </p>
+          ))}
+          <p className="text-xs font-bold leading-5 text-slate-500">
+            Catalog reviewed: {decisionSet.pipelineDebug.catalogCount}. Excluded: {decisionSet.pipelineDebug.excludedCount}.
+          </p>
+        </div>
+      </details>
     </div>
   );
 }
@@ -2178,29 +2440,89 @@ function getComparedVehicles(vehicles: ScoredVehicle[], compareIds: string[]) {
   return selectedVehicles.length ? selectedVehicles : vehicles.slice(0, 3);
 }
 
-function getAnsweredCount(profile: BuyerProfile) {
-  const neutralValues = new Set(["not-sure", "any"]);
-  const optionalSignals = [
-    profile.purchaseCondition,
-    profile.paymentMethod,
-    profile.cargoNeed,
-    profile.drivetrainPreference,
-    profile.transmissionPreference,
-    profile.bodyStyle,
-    profile.climate,
-    profile.modificationPlans,
-    profile.safetyPriority,
-  ].filter((value) => !neutralValues.has(value)).length;
+function createSearchSnapshot({
+  decisionReport,
+  decisionSet,
+  profile,
+  rankedVehicles,
+  sessionId,
+  source,
+}: {
+  decisionReport: DecisionReport;
+  decisionSet: RecommendationDecisionSet;
+  profile: BuyerProfile;
+  rankedVehicles: ScoredVehicle[];
+  sessionId: string;
+  source: RecommendationSearchSnapshot["source"];
+}): RecommendationSearchSnapshot {
+  return {
+    decisionReport,
+    decisionSet,
+    inputFingerprint: fingerprintProfile(profile),
+    profile,
+    rankedVehicles,
+    resultFingerprint: fingerprintDecisionSet(decisionSet),
+    sessionId,
+    source,
+  };
+}
 
-  const numericSignals = [
-    profile.maxPurchaseBudget,
-    profile.monthlyBudget,
-    profile.insuranceBudget,
-    profile.expectedAnnualMileage,
-    profile.familySize > 1 ? profile.familySize : 0,
-  ].filter(Boolean).length;
+function createRecommendationSessionId(sequence: number) {
+  return `search-${sequence}-${Date.now().toString(36)}`;
+}
 
-  return formatNumber(optionalSignals + numericSignals);
+function fingerprintProfile(profile: BuyerProfile) {
+  return stableFingerprint({
+    bodyStyle: profile.bodyStyle,
+    budget: profile.maxPurchaseBudget,
+    drivetrain: profile.drivetrainPreference,
+    allowedMakes: profile.allowedMakes || [],
+    excludedMakes: profile.excludedMakes || [],
+    familySize: profile.familySize,
+    flexibleConstraints: profile.flexibleConstraints || [],
+    fuelType: profile.requiredFuelType,
+    maxMileage: profile.maxMileage,
+    minYear: profile.minYear,
+    requiredMake: profile.requiredMake,
+    transmission: profile.transmissionPreference,
+  });
+}
+
+function fingerprintDecisionSet(decisionSet: RecommendationDecisionSet) {
+  return stableFingerprint({
+    compromise: decisionSet.compromiseRecommendations.map((item) => item.vehicleId),
+    excludedCount: decisionSet.pipelineDebug.excludedCount,
+    noMatch: decisionSet.noMatch.noMatch,
+    qualified: decisionSet.primaryRecommendations.map((item) => item.vehicleId),
+    top: decisionSet.primaryRecommendations[0]?.vehicleId || "no-match",
+  });
+}
+
+function stableFingerprint(value: unknown) {
+  return JSON.stringify(value);
+}
+
+function logRecommendationDiagnostics(snapshot: Omit<RecommendationSearchSnapshot, "inputFingerprint" | "resultFingerprint">) {
+  if (process.env.NODE_ENV !== "development") return;
+  console.debug("[advisor-recommendation-diagnostics]", {
+    buyerProfile: {
+      bodyStyle: snapshot.profile.bodyStyle,
+      budget: snapshot.profile.maxPurchaseBudget,
+      allowedMakes: snapshot.profile.allowedMakes || [],
+      excludedMakes: snapshot.profile.excludedMakes || [],
+      flexibleConstraints: snapshot.profile.flexibleConstraints || [],
+      requiredFuelType: snapshot.profile.requiredFuelType,
+      requiredMake: snapshot.profile.requiredMake,
+    },
+    candidateCount: snapshot.decisionSet.pipelineDebug.candidateCount,
+    compromiseCount: snapshot.decisionSet.pipelineDebug.compromiseCount,
+    inputFingerprint: fingerprintProfile(snapshot.profile),
+    qualifiedCount: snapshot.decisionSet.pipelineDebug.qualifiedCount,
+    resultFingerprint: fingerprintDecisionSet(snapshot.decisionSet),
+    sessionId: snapshot.sessionId,
+    source: snapshot.source,
+    visibleWinner: snapshot.decisionSet.primaryRecommendations[0]?.vehicleId || null,
+  });
 }
 
 function getNoMatchReasons(profile: BuyerProfile, vehicles: Vehicle[]) {
@@ -2274,6 +2596,7 @@ function mergeFineTuneConversion(
   const nextHardConstraints = conversion.appliedHardConstraints.filter(removeChangedFields);
   const nextSoftPreferences = conversion.appliedSoftPreferences.filter(removeChangedFields);
   const nextPreservedDefaults = conversion.preservedDefaults.filter(removeChangedFields);
+  const nextPreservedSemanticPreferences = conversion.preservedSemanticPreferences.filter(removeChangedFields);
   const nextUnresolvedFields = conversion.unresolvedFields.filter(removeChangedFields);
 
   changedFields.forEach((field) => {
@@ -2299,6 +2622,7 @@ function mergeFineTuneConversion(
     },
     appliedHardConstraints: nextHardConstraints,
     appliedSoftPreferences: nextSoftPreferences,
+    preservedSemanticPreferences: nextPreservedSemanticPreferences,
     preservedDefaults: nextPreservedDefaults,
     unresolvedFields: nextUnresolvedFields,
     disclosedAssumptions: nextPreservedDefaults.map((item) => `${item.label}: ${item.displayValue}`),
@@ -2376,6 +2700,17 @@ const fineTuneTrackedFields: Array<keyof BuyerProfile> = [
   "maxMileage",
   "minYear",
 ];
+
+function clearMakeState(profile: BuyerProfile): BuyerProfile {
+  return {
+    ...profile,
+    requiredMake: undefined,
+    preferredMake: undefined,
+    allowedMakes: undefined,
+    excludedMakes: undefined,
+    decisionPolicies: undefined,
+  };
+}
 
 function getFineTuneChangedFields(previousProfile: BuyerProfile, nextProfile: BuyerProfile): Array<keyof BuyerProfile> {
   return fineTuneTrackedFields.filter((field) => {

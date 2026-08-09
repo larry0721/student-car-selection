@@ -125,7 +125,7 @@ export function summarizeFineTuneChanges(fields: Array<keyof BuyerProfile>): Fin
     changedFields: uniqueFields,
     labels,
     message: labels.length
-      ? `You changed ${labels.length} preference${labels.length === 1 ? "" : "s"}: ${formatList(labels)}. Your current result still uses the previous profile.`
+      ? `You changed ${labels.length} preference${labels.length === 1 ? "" : "s"}: ${formatList(labels)}. The previous recommendation was cleared until you update.`
       : "No unapplied fine-tuning changes.",
   };
 }

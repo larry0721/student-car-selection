@@ -11,6 +11,10 @@ export type ScoreWeights = {
 };
 
 export type ImportanceLevel = "low" | "normal" | "important" | "very-important";
+export type BodyStyle = "sedan" | "suv" | "hatchback" | "truck" | "coupe" | "convertible" | "wagon" | "minivan";
+export type FuelType = "gas" | "hybrid" | "electric" | "diesel";
+export type Drivetrain = "FWD" | "AWD" | "RWD" | "4WD";
+export type Transmission = "automatic" | "manual" | "cvt";
 
 export type ConstraintKey =
   | "totalBudget"
@@ -47,9 +51,9 @@ export type BuyerProfile = {
   performanceImportance: number;
   cargoNeed: "not-sure" | "low" | "medium" | "high";
   familySize: number;
-  drivetrainPreference: "any" | "FWD" | "AWD" | "RWD" | "4WD";
-  transmissionPreference: "any" | "automatic" | "manual";
-  bodyStyle: "any" | "sedan" | "suv" | "hatchback" | "truck" | "coupe" | "convertible" | "wagon" | "minivan";
+  drivetrainPreference: "any" | Drivetrain;
+  transmissionPreference: "any" | Exclude<Transmission, "cvt">;
+  bodyStyle: "any" | BodyStyle;
   climate: "not-sure" | "mild" | "rain" | "snow";
   resaleValueImportance: number;
   modificationPlans: "not-sure" | "no" | "yes";
@@ -58,12 +62,37 @@ export type BuyerProfile = {
   scoreWeights: ScoreWeights;
   requiredMake?: string;
   preferredMake?: string;
-  requiredFuelType?: "gas" | "hybrid" | "electric" | "diesel";
+  allowedMakes?: string[];
+  excludedMakes?: string[];
+  requiredFuelType?: FuelType;
+  requiredMakes?: string[];
+  preferredMakes?: string[];
+  requiredBodyStyles?: BodyStyle[];
+  preferredBodyStyles?: BodyStyle[];
+  allowedBodyStyles?: BodyStyle[];
+  excludedBodyStyles?: BodyStyle[];
+  requiredVehicleCategories?: BodyStyle[];
+  preferredVehicleCategories?: BodyStyle[];
+  allowedVehicleCategories?: BodyStyle[];
+  excludedVehicleCategories?: BodyStyle[];
+  requiredFuelTypes?: FuelType[];
+  preferredFuelTypes?: FuelType[];
+  allowedFuelTypes?: FuelType[];
+  excludedFuelTypes?: FuelType[];
+  requiredDrivetrains?: Drivetrain[];
+  preferredDrivetrains?: Drivetrain[];
+  allowedDrivetrains?: Drivetrain[];
+  excludedDrivetrains?: Drivetrain[];
+  requiredTransmissions?: Transmission[];
+  preferredTransmissions?: Transmission[];
+  allowedTransmissions?: Transmission[];
+  excludedTransmissions?: Transmission[];
   reliabilityMinimum?: number;
   safetyMinimum?: number;
   performanceMinimum?: number;
   flexibleConstraints?: ConstraintKey[];
   allowCompromises?: boolean;
+  decisionPolicies?: DecisionParticipationPolicyMap;
 };
 
 export type BudgetSummary = {
@@ -72,3 +101,4 @@ export type BudgetSummary = {
   paymentBudget: number;
   maxPurchasePrice: number;
 };
+import type { DecisionParticipationPolicyMap } from "./decisionPolicy";

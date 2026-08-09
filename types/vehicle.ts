@@ -1,4 +1,8 @@
 import type { ConstraintKey, ScoreWeights } from "@/types/buyer";
+import type {
+  EffectiveScoringPolicy,
+  ScoreContributionRecord,
+} from "@/types/scoring";
 
 export type Vehicle = {
   id: string;
@@ -234,6 +238,10 @@ export type RecommendationObject = {
   hardConstraintsPassed: HardConstraintResult[];
   softPreferenceScore: number;
   overallMatchScore: number;
+  effectiveScoringPolicy: EffectiveScoringPolicy;
+  scoreContributions: ScoreContributionRecord[];
+  weightedScoreBeforePenalties: number;
+  penaltyTotal: number;
   recommendationConfidence: RecommendationConfidence;
   dataQualityConfidence: RecommendationConfidence;
   reasonsForRecommendation: RecommendationSignal[];
@@ -277,6 +285,77 @@ export type DecisionReport = {
   whatCouldChangeRecommendation: string[];
 };
 
+export type VisibleThinkingVehicleRef = {
+  vehicleId: string;
+  year: number;
+  make: string;
+  model: string;
+  overallMatchScore: number;
+};
+
+export type VisibleThinkingDecisionStep = {
+  code:
+    | "catalog_scope"
+    | "hard_constraint_filter"
+    | "finalist_comparison"
+    | "deciding_factor"
+    | "no_match_blockers"
+    | "single_qualified"
+    | "compromise_disclosure"
+    | "data_confidence_disclosure";
+  text: string;
+  evidenceCodes: string[];
+};
+
+export type VisibleThinkingHardestComparison = {
+  winningVehicle: VisibleThinkingVehicleRef;
+  runnerUpVehicle: VisibleThinkingVehicleRef;
+  runnerUpStrongestMeaningfulAdvantage: string;
+  exactStructuredReasonItLost: string;
+  decidingUserPriorityOrCategory?: keyof ScoreWeights | "overallMatchScore" | "penalty";
+  scoreGap: number;
+  isCloseDecision: boolean;
+  evidenceCodes: string[];
+};
+
+export type VisibleThinkingConclusion = {
+  status: "recommendation" | "single-qualified" | "compromise" | "no-match";
+  text: string;
+  evidenceCodes: string[];
+};
+
+export type VisibleThinkingSummary = {
+  catalogCount: number;
+  candidateCount: number;
+  excludedCount: number;
+  qualifiedCount: number;
+  compromiseCount: number;
+  finalistVehicleIds: string[];
+  shortSummary: string;
+  hardestComparison?: VisibleThinkingHardestComparison;
+  decisionSteps: VisibleThinkingDecisionStep[];
+  conclusion: VisibleThinkingConclusion;
+  uncertaintyDisclosure?: VisibleThinkingDecisionStep;
+};
+
+export type HumanDecisionStoryExpandedStep = {
+  label: string;
+  text: string;
+  evidenceCodes: string[];
+};
+
+export type HumanDecisionStory = {
+  opening: string;
+  narrowingSummary: string;
+  finalists?: string;
+  finalistContrast?: string;
+  decidingFactor?: string;
+  conclusion: string;
+  uncertaintyNote?: string;
+  defaultParagraphs: string[];
+  expandedSteps: HumanDecisionStoryExpandedStep[];
+};
+
 export type ScoredVehicle = Vehicle & {
   score: number;
   matchSummary: {
@@ -295,6 +374,10 @@ export type ScoredVehicle = Vehicle & {
   scoreBreakdown: Record<keyof ScoreWeights, number>;
   weightedContributions: Record<keyof ScoreWeights, number>;
   categoryWeights: Record<keyof ScoreWeights, number>;
+  effectiveScoringPolicy: EffectiveScoringPolicy;
+  scoreContributions: ScoreContributionRecord[];
+  weightedScoreBeforePenalties: number;
+  penaltyTotal: number;
   positiveContributions: Array<{
     category: keyof ScoreWeights;
     label: string;

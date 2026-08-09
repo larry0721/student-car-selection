@@ -13,6 +13,7 @@
     "components/**/*.tsx",
     "data/**/*.ts",
     "lib/**/*.ts",
+    "src/**/*.ts",
     "types/**/*.ts"
   ],
   "exclude": [

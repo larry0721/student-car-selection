@@ -14,6 +14,12 @@ import {
   type ConfirmedPreferenceProfile,
 } from "../lib/confirmedPreferenceProfile";
 import { defaultScoreWeights } from "../lib/recommendations";
+import {
+  assessConfirmedPreferenceDraftReadiness,
+  assessConfirmedProfileConversionReadiness,
+} from "../lib/recommendationReadiness";
+import { convertConfirmedPreferencesToBuyerProfile } from "../lib/confirmedProfileConversion";
+import { getVehiclePhotoState } from "../lib/vehiclePhoto";
 import type { BuyerProfile } from "../types/buyer";
 
 const defaults: BuyerProfile = {
@@ -113,6 +119,7 @@ assert.equal(requireItemByField(rememberedDraft, "maxPurchaseBudget").value, 150
 
 let correctedBeforeAnotherQuestion = createConfirmedPreferenceProfile(createConversationIntakeSession("I want a BMW that looks premium."), defaults);
 const inferredStyle = findItemByLabel(correctedBeforeAnotherQuestion, "Design and image matter");
+assert.equal(inferredStyle.recommendationSupport, "understood_not_ranked");
 correctedBeforeAnotherQuestion = removePreferenceItem(correctedBeforeAnotherQuestion, inferredStyle.id);
 correctedBeforeAnotherQuestion = updateConfirmedPreferenceItem(correctedBeforeAnotherQuestion, requireItemByField(correctedBeforeAnotherQuestion, "maxPurchaseBudget").id, {
   value: 25000,
@@ -134,6 +141,37 @@ assert.equal(requireItemByField(carriedDraft, "maxPurchaseBudget").value, 25000)
 assert.equal(requireItemByField(carriedDraft, "maxPurchaseBudget").constraintStrength, "required");
 assert.equal(requireItemByField(carriedDraft, "preferredMake").constraintStrength, "required");
 assert.equal(findItemByLabelOrUndefined(carriedDraft, "Design and image matter"), undefined);
+
+const successImageDraft = createConfirmedPreferenceProfile(createConversationIntakeSession("I want something that looks premium."), defaults);
+const imageItem = findItemByLabel(successImageDraft, "Design and image matter");
+assert.equal(imageItem.recommendationSupport, "understood_not_ranked");
+assert.equal(imageItem.field, undefined);
+assert.ok(successImageDraft.advisorSummary.includes("I understand this preference is part of what you care about"));
+assert.equal(assessConfirmedPreferenceDraftReadiness(successImageDraft).ready, false);
+assert.ok(assessConfirmedPreferenceDraftReadiness(successImageDraft).clarificationQuestion.includes("cannot directly score appearance"));
+
+const campingDraft = createConfirmedPreferenceProfile(createConversationIntakeSession("I need something for camping."), defaults);
+assert.equal(assessConfirmedPreferenceDraftReadiness(campingDraft).ready, false);
+assert.ok(assessConfirmedPreferenceDraftReadiness(campingDraft).clarificationQuestion.includes("camping trips"));
+
+const toyotaDraft = createConfirmedPreferenceProfile(createConversationIntakeSession("I want a Toyota."), defaults);
+assert.equal(requireItemByField(toyotaDraft, "requiredMake").displayValue, "Toyota");
+assert.equal(requireItemByField(toyotaDraft, "requiredMake").constraintStrength, "required");
+assert.equal(assessConfirmedPreferenceDraftReadiness(toyotaDraft).ready, true);
+const toyotaConversion = convertConfirmedPreferencesToBuyerProfile(defaults, approveConfirmedPreferenceProfile(toyotaDraft, 99));
+assert.equal(toyotaConversion.buyerProfile.requiredMake, "Toyota");
+assert.equal(assessConfirmedProfileConversionReadiness(toyotaConversion).ready, true);
+
+const fallbackDraft = createConfirmedPreferenceProfile(createConversationIntakeSession("Toyota preferred, but Honda is acceptable."), defaults);
+assert.equal(requireItemByField(fallbackDraft, "preferredMake").displayValue, "Toyota");
+assert.equal(requireItemByField(fallbackDraft, "allowedMakes").displayValue, "Toyota, Honda");
+const fallbackConversion = convertConfirmedPreferencesToBuyerProfile(defaults, approveConfirmedPreferenceProfile(fallbackDraft, 99));
+assert.equal(fallbackConversion.buyerProfile.preferredMake, "Toyota");
+assert.deepEqual(fallbackConversion.buyerProfile.allowedMakes, ["Honda"]);
+
+assert.equal(getVehiclePhotoState({ imageUrl: "https://example.test/car.jpg" }, false), "photo");
+assert.equal(getVehiclePhotoState({ imageUrl: "https://example.test/car.jpg" }, true), "fallback");
+assert.equal(getVehiclePhotoState({ imageUrl: undefined }, false), "fallback");
 
 const approved = approveConfirmedPreferenceProfile(bmwDraft, bmwSession.conversationTurns.length + 1);
 assert.equal(approved.userApproved, true);

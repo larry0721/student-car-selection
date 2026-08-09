@@ -94,6 +94,27 @@ function assertRecommendationObject(recommendation: RecommendationObject) {
   assert.ok(recommendation.hardConstraintsPassed.every((constraint) => constraint.passed));
   assertScore(recommendation.softPreferenceScore, "softPreferenceScore");
   assertScore(recommendation.overallMatchScore, "overallMatchScore");
+  assert.equal(recommendation.effectiveScoringPolicy.targetWeightTotal, 100);
+  assert.equal(recommendation.scoreContributions.length, 9);
+  assert.equal(
+    recommendation.scoreContributions.reduce(
+      (sum, contribution) => sum + contribution.weightedContribution,
+      0,
+    ),
+    recommendation.weightedScoreBeforePenalties,
+  );
+  assert.equal(
+    recommendation.overallMatchScore,
+    Math.max(
+      0,
+      Math.min(
+        100,
+        Math.round(
+          recommendation.weightedScoreBeforePenalties - recommendation.penaltyTotal,
+        ),
+      ),
+    ),
+  );
   assertConfidence(recommendation.recommendationConfidence, "recommendationConfidence");
   assertConfidence(recommendation.dataQualityConfidence, "dataQualityConfidence");
   assert.ok(recommendation.reasonsForRecommendation.length > 0, "structured reasons should exist");

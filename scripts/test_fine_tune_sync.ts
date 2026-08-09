@@ -65,7 +65,10 @@ const editedBudgetMetadata = markManualFieldEdit(budgetMetadata, "maxPurchaseBud
 assert.equal(editedBudgetProfile.maxPurchaseBudget, 20000);
 assert.equal(editedBudgetMetadata.maxPurchaseBudget?.source, "manual-edit");
 assert.equal(editedBudgetMetadata.maxPurchaseBudget?.certainty, "confirmed");
-assert.equal(summarizeFineTuneChanges(["maxPurchaseBudget"]).message, "You changed 1 preference: budget. Your current result still uses the previous profile.");
+assert.equal(
+  summarizeFineTuneChanges(["maxPurchaseBudget"]).message,
+  "You changed 1 preference: budget. The previous recommendation was cleared until you update.",
+);
 
 const multiple = summarizeFineTuneChanges(["maxPurchaseBudget", "drivetrainPreference", "requiredMake"]);
 assert.equal(multiple.changedFields.length, 3);
