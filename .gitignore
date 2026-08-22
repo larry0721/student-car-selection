@@ -20,6 +20,21 @@ data/raw/**
 !data/raw/
 !data/raw/KAGGLE_DATASET_REVIEW.md
 
+# Local catalog-enrichment review manifests may contain retained source snapshots.
+data/enrichment-review/manifests/**
+!data/enrichment-review/manifests/
+!data/enrichment-review/manifests/.gitkeep
+
+# Local vehicle-knowledge repositories retain approved source-derived claims.
+data/vehicle-knowledge/repositories/**
+!data/vehicle-knowledge/repositories/
+!data/vehicle-knowledge/repositories/.gitkeep
+
+# Shadow published CVR repositories are versioned locally and may contain source-derived intelligence.
+data/published-vehicle-intelligence/repositories/**
+!data/published-vehicle-intelligence/repositories/
+!data/published-vehicle-intelligence/repositories/.gitkeep
+
 # Python and OS artifacts
 __pycache__/
 *.py[cod]

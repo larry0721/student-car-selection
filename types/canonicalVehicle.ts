@@ -272,6 +272,23 @@ export const canonicalVehicleFieldUnits = {
   >;
 };
 
+export function getCanonicalVehicleFieldAllowedUnits(
+  fieldPath: CanonicalVehicleFieldPath,
+): readonly CanonicalUnit[] {
+  if (fieldPath === "environment.fuelEconomy") {
+    return ["mpg", "mpge", "kwh_per_100_miles"];
+  }
+  const [section, field] = fieldPath.split(".") as [CanonicalVehicleSectionName, string];
+  return [(canonicalVehicleFieldUnits[section] as Record<string, CanonicalUnit>)[field]];
+}
+
+export function isCanonicalVehicleFieldUnitAllowed(
+  fieldPath: CanonicalVehicleFieldPath,
+  unit: CanonicalUnit,
+) {
+  return getCanonicalVehicleFieldAllowedUnits(fieldPath).includes(unit);
+}
+
 export type CanonicalConfidence = {
   score: number | null;
   level: CanonicalConfidenceLevel;

@@ -12,6 +12,15 @@ export type DecodedVin = {
   vehicleType: string | null;
 };
 
+export type NhtsaModel = {
+  makeId: number | null;
+  makeName: string | null;
+  modelId: number | null;
+  modelName: string | null;
+  modelYear: number;
+  vehicleTypeName: string | null;
+};
+
 type NhtsaDecodeVinValue = {
   Make?: unknown;
   Model?: unknown;
@@ -27,6 +36,15 @@ type NhtsaDecodeVinValue = {
 
 type NhtsaDecodeVinResponse = {
   Results?: unknown;
+};
+
+type NhtsaModelValue = {
+  Make_ID?: unknown;
+  Make_Name?: unknown;
+  Model_ID?: unknown;
+  Model_Name?: unknown;
+  ModelYear?: unknown;
+  VehicleTypeName?: unknown;
 };
 
 export async function decodeVin(vin: string): Promise<DecodedVin> {
@@ -98,6 +116,53 @@ export async function decodeVin(vin: string): Promise<DecodedVin> {
   return decoded;
 }
 
+export async function getModelsForMakeYear(make: string, modelYear: number): Promise<NhtsaModel[]> {
+  const normalizedMake = make.trim();
+  if (!normalizedMake) throw new Error("Invalid NHTSA model request: make is required.");
+  if (!Number.isInteger(modelYear) || modelYear < 1886 || modelYear > new Date().getUTCFullYear() + 2) {
+    throw new Error("Invalid NHTSA model request: model year is outside the supported range.");
+  }
+
+  const url = new URL(
+    `${nhtsaVpicBaseUrl}/GetModelsForMakeYear/make/${encodeURIComponent(normalizedMake)}/modelyear/${modelYear}`,
+  );
+  url.searchParams.set("format", "json");
+
+  let response: Response;
+  try {
+    response = await fetch(url, { headers: { Accept: "application/json" } });
+  } catch (error) {
+    throw new Error("NHTSA model request failed because the network request could not be completed.", {
+      cause: error,
+    });
+  }
+  if (!response.ok) throw new Error(`NHTSA model request failed with HTTP status ${response.status}.`);
+
+  let payload: NhtsaDecodeVinResponse;
+  try {
+    payload = await response.json() as NhtsaDecodeVinResponse;
+  } catch (error) {
+    throw new Error("NHTSA model response was not valid JSON.", { cause: error });
+  }
+  if (!Array.isArray(payload.Results)) throw new Error("NHTSA model request returned an unexpected response shape.");
+
+  return payload.Results.flatMap((item) => {
+    if (!isDecodeVinValue(item)) return [];
+    const value = item as NhtsaModelValue;
+    const makeName = asString(value.Make_Name);
+    const modelName = asString(value.Model_Name);
+    if (!makeName || !modelName) return [];
+    return [{
+      makeId: asInteger(value.Make_ID),
+      makeName,
+      modelId: asInteger(value.Model_ID),
+      modelName,
+      modelYear: asYear(value.ModelYear) ?? modelYear,
+      vehicleTypeName: asString(value.VehicleTypeName),
+    }];
+  });
+}
+
 function isDecodeVinValue(value: unknown): value is NhtsaDecodeVinValue {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
@@ -113,4 +178,11 @@ function asYear(value: unknown) {
   if (!normalized) return null;
   const year = Number(normalized);
   return Number.isInteger(year) && year >= 1886 ? year : null;
+}
+
+function asInteger(value: unknown) {
+  const normalized = asString(value);
+  if (!normalized) return null;
+  const parsed = Number(normalized);
+  return Number.isInteger(parsed) ? parsed : null;
 }

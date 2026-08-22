@@ -7,6 +7,7 @@ import {
 } from "@/lib/advisorCommunication";
 import { scoreWeightLabels } from "@/lib/recommendations";
 import { getVehiclePhotoState } from "@/lib/vehiclePhoto";
+import { VehicleIntelligencePanel } from "@/components/VehicleIntelligencePanel";
 import type { BuyerProfile } from "@/types/buyer";
 import type {
   CandidatePipelineDebug,
@@ -140,6 +141,12 @@ export function VisibleIntelligenceResults({
           <BudgetHeadroom monthlyHeadroom={monthlyHeadroom} profile={profile} />
         </div>
       </section>
+
+      <VehicleIntelligencePanel
+        profile={profile}
+        reasons={communication.reasons}
+        vehicleId={topVehicle.id}
+      />
 
       <DisclosureSection eyebrow="Decision details" title="Why this recommendation">
         <div className="grid gap-4">

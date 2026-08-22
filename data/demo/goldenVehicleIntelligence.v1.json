@@ -1,0 +1,941 @@
+{
+  "schemaVersion": "1.0.0",
+  "snapshotId": "demo-vehicle-intelligence:1.0.0:2026-08-17T05:37:17.889Z",
+  "goldenDatasetVersion": "1.0.0",
+  "generatedAt": "2026-08-19T23:28:08.899Z",
+  "recommendationRuntimeConnected": false,
+  "sourceVersions": {
+    "publishedRepositoryId": "phase-3.2e-golden-set-v1-shadow",
+    "publishedRepositoryUpdatedAt": "2026-08-17T05:37:17.889Z",
+    "safetySnapshotAt": "2026-08-17T05:37:17.889Z",
+    "reliabilityPolicyVersion": "1.0.0"
+  },
+  "vehicles": [
+    {
+      "vehicleId": "hyundai-accent-2017-craigslist-carstrucks-data",
+      "displayName": "2017 Hyundai Accent",
+      "publication": {
+        "publicationId": "published-cvr:1s8ef70:v2:8vxpy6",
+        "recordVersion": 2,
+        "publishedAt": "2026-08-17T05:37:17.889Z"
+      },
+      "trustedFacts": [
+        {
+          "field": "vehicleCategory",
+          "value": "compact_car",
+          "unit": "none",
+          "confidence": "medium",
+          "evidenceIds": [
+            "review-enrichment:hyundai-accent-2017-craigslist-carstrucks-data:epa:hyundai-accent-2017-craigslist-carstrucks-data:epa:v1:fueleconomy:37479:mapped"
+          ],
+          "sources": [
+            {
+              "providerName": "FuelEconomy.gov / EPA",
+              "sourceRecordId": "37479",
+              "sourceUrl": "https://www.fueleconomy.gov/ws/rest/vehicle/37479",
+              "retrievedAt": "2026-08-12T04:03:06.693Z"
+            }
+          ]
+        },
+        {
+          "field": "drivetrain",
+          "value": "FWD",
+          "unit": "none",
+          "confidence": "medium",
+          "evidenceIds": [
+            "review-enrichment:hyundai-accent-2017-craigslist-carstrucks-data:epa:hyundai-accent-2017-craigslist-carstrucks-data:epa:v1:fueleconomy:37479:mapped"
+          ],
+          "sources": [
+            {
+              "providerName": "FuelEconomy.gov / EPA",
+              "sourceRecordId": "37479",
+              "sourceUrl": "https://www.fueleconomy.gov/ws/rest/vehicle/37479",
+              "retrievedAt": "2026-08-12T04:03:06.693Z"
+            }
+          ]
+        },
+        {
+          "field": "transmission",
+          "value": "automatic",
+          "unit": "none",
+          "confidence": "medium",
+          "evidenceIds": [
+            "review-enrichment:hyundai-accent-2017-craigslist-carstrucks-data:epa:hyundai-accent-2017-craigslist-carstrucks-data:epa:v1:fueleconomy:37479:mapped"
+          ],
+          "sources": [
+            {
+              "providerName": "FuelEconomy.gov / EPA",
+              "sourceRecordId": "37479",
+              "sourceUrl": "https://www.fueleconomy.gov/ws/rest/vehicle/37479",
+              "retrievedAt": "2026-08-12T04:03:06.693Z"
+            }
+          ]
+        },
+        {
+          "field": "fuelType",
+          "value": "gas",
+          "unit": "none",
+          "confidence": "medium",
+          "evidenceIds": [
+            "review-enrichment:hyundai-accent-2017-craigslist-carstrucks-data:epa:hyundai-accent-2017-craigslist-carstrucks-data:epa:v1:fueleconomy:37479:mapped"
+          ],
+          "sources": [
+            {
+              "providerName": "FuelEconomy.gov / EPA",
+              "sourceRecordId": "37479",
+              "sourceUrl": "https://www.fueleconomy.gov/ws/rest/vehicle/37479",
+              "retrievedAt": "2026-08-12T04:03:06.693Z"
+            }
+          ]
+        },
+        {
+          "field": "fuelEconomy",
+          "value": 30,
+          "unit": "mpg",
+          "confidence": "high",
+          "evidenceIds": [
+            "review-enrichment:hyundai-accent-2017-craigslist-carstrucks-data:epa:hyundai-accent-2017-craigslist-carstrucks-data:epa:v1:fueleconomy:37479:direct"
+          ],
+          "sources": [
+            {
+              "providerName": "FuelEconomy.gov / EPA",
+              "sourceRecordId": "37479",
+              "sourceUrl": "https://www.fueleconomy.gov/ws/rest/vehicle/37479",
+              "retrievedAt": "2026-08-12T04:03:06.693Z"
+            }
+          ]
+        },
+        {
+          "field": "emissions",
+          "value": 295,
+          "unit": "grams_co2e_per_mile",
+          "confidence": "high",
+          "evidenceIds": [
+            "review-enrichment:hyundai-accent-2017-craigslist-carstrucks-data:epa:hyundai-accent-2017-craigslist-carstrucks-data:epa:v1:fueleconomy:37479:direct"
+          ],
+          "sources": [
+            {
+              "providerName": "FuelEconomy.gov / EPA",
+              "sourceRecordId": "37479",
+              "sourceUrl": "https://www.fueleconomy.gov/ws/rest/vehicle/37479",
+              "retrievedAt": "2026-08-12T04:03:06.693Z"
+            }
+          ]
+        }
+      ],
+      "safety": {
+        "ratingState": "RATED",
+        "sourceVehicleId": "11111",
+        "vehicleDescription": "2017 Hyundai Accent 4 DR FWD",
+        "matchConfidence": 0.98,
+        "ratings": {
+          "overall": 4,
+          "frontCrash": 4,
+          "sideCrash": 4,
+          "rollover": 4,
+          "rolloverPossibilityRatio": 0.124
+        },
+        "technology": {
+          "electronicStabilityControl": "Standard",
+          "forwardCollisionWarning": "No",
+          "laneDepartureWarning": "No"
+        },
+        "source": {
+          "providerName": "NHTSA Safety Ratings / NCAP",
+          "sourceRecordId": "11111",
+          "sourceUrl": "https://api.nhtsa.gov/SafetyRatings/VehicleId/11111?format=json",
+          "retrievedAt": "2026-08-17T05:37:17.889Z"
+        }
+      },
+      "reliability": {
+        "assessmentId": "reliability-risk:kobd4m:1.0.0",
+        "sourceInterpretationId": "reliability-interpretation:1iq4kfe:1.0.0",
+        "concernLevel": "MEANINGFUL_CONCERN",
+        "primaryConcerns": [
+          {
+            "component": "engine",
+            "corroboration": "REPEATED_ALLEGATIONS",
+            "confidence": "low",
+            "evidenceCount": 24
+          },
+          {
+            "component": "brakes",
+            "corroboration": "REPEATED_ALLEGATIONS",
+            "confidence": "low",
+            "evidenceCount": 5
+          },
+          {
+            "component": "electrical",
+            "corroboration": "REPEATED_ALLEGATIONS",
+            "confidence": "low",
+            "evidenceCount": 9
+          }
+        ],
+        "evidenceConfidence": "low",
+        "applicabilityScope": "model_year",
+        "applicabilityConfidence": "MEDIUM",
+        "exposureAvailability": "UNAVAILABLE",
+        "exposureLimitation": "68 complaint record(s) observed; exposure-adjusted complaint rate unavailable.",
+        "comparativeReliabilitySupported": false,
+        "recommendationScoringEligible": false,
+        "source": {
+          "providerName": "NHTSA recalls and complaints",
+          "sourceRecordId": "reliability-interpretation:1iq4kfe:1.0.0",
+          "sourceUrl": "https://www.nhtsa.gov/recalls",
+          "retrievedAt": "2026-08-17T06:07:20.276Z"
+        }
+      }
+    },
+    {
+      "vehicleId": "toyota-prius-2016-usedcarscatalog",
+      "displayName": "2016 Toyota Prius",
+      "publication": {
+        "publicationId": "published-cvr:2sq0lf:v2:10ed0i",
+        "recordVersion": 2,
+        "publishedAt": "2026-08-17T05:37:17.889Z"
+      },
+      "trustedFacts": [
+        {
+          "field": "vehicleCategory",
+          "value": "midsize_car",
+          "unit": "none",
+          "confidence": "medium",
+          "evidenceIds": [
+            "review-enrichment:toyota-prius-2016-usedcarscatalog:epa:toyota-prius-2016-usedcarscatalog:epa:v1:fueleconomy:37163:mapped"
+          ],
+          "sources": [
+            {
+              "providerName": "FuelEconomy.gov / EPA",
+              "sourceRecordId": "37163",
+              "sourceUrl": "https://www.fueleconomy.gov/ws/rest/vehicle/37163",
+              "retrievedAt": "2026-08-12T04:03:06.693Z"
+            }
+          ]
+        },
+        {
+          "field": "drivetrain",
+          "value": "FWD",
+          "unit": "none",
+          "confidence": "medium",
+          "evidenceIds": [
+            "review-enrichment:toyota-prius-2016-usedcarscatalog:epa:toyota-prius-2016-usedcarscatalog:epa:v1:fueleconomy:37163:mapped"
+          ],
+          "sources": [
+            {
+              "providerName": "FuelEconomy.gov / EPA",
+              "sourceRecordId": "37163",
+              "sourceUrl": "https://www.fueleconomy.gov/ws/rest/vehicle/37163",
+              "retrievedAt": "2026-08-12T04:03:06.693Z"
+            }
+          ]
+        },
+        {
+          "field": "transmission",
+          "value": "cvt",
+          "unit": "none",
+          "confidence": "medium",
+          "evidenceIds": [
+            "review-enrichment:toyota-prius-2016-usedcarscatalog:epa:toyota-prius-2016-usedcarscatalog:epa:v1:fueleconomy:37163:mapped"
+          ],
+          "sources": [
+            {
+              "providerName": "FuelEconomy.gov / EPA",
+              "sourceRecordId": "37163",
+              "sourceUrl": "https://www.fueleconomy.gov/ws/rest/vehicle/37163",
+              "retrievedAt": "2026-08-12T04:03:06.693Z"
+            }
+          ]
+        },
+        {
+          "field": "fuelType",
+          "value": "hybrid",
+          "unit": "none",
+          "confidence": "medium",
+          "evidenceIds": [
+            "review-enrichment:toyota-prius-2016-usedcarscatalog:epa:toyota-prius-2016-usedcarscatalog:epa:v1:fueleconomy:37163:mapped"
+          ],
+          "sources": [
+            {
+              "providerName": "FuelEconomy.gov / EPA",
+              "sourceRecordId": "37163",
+              "sourceUrl": "https://www.fueleconomy.gov/ws/rest/vehicle/37163",
+              "retrievedAt": "2026-08-12T04:03:06.693Z"
+            }
+          ]
+        },
+        {
+          "field": "fuelEconomy",
+          "value": 52,
+          "unit": "mpg",
+          "confidence": "high",
+          "evidenceIds": [
+            "review-enrichment:toyota-prius-2016-usedcarscatalog:epa:toyota-prius-2016-usedcarscatalog:epa:v1:fueleconomy:37163:direct"
+          ],
+          "sources": [
+            {
+              "providerName": "FuelEconomy.gov / EPA",
+              "sourceRecordId": "37163",
+              "sourceUrl": "https://www.fueleconomy.gov/ws/rest/vehicle/37163",
+              "retrievedAt": "2026-08-12T04:03:06.693Z"
+            }
+          ]
+        },
+        {
+          "field": "emissions",
+          "value": 170,
+          "unit": "grams_co2e_per_mile",
+          "confidence": "high",
+          "evidenceIds": [
+            "review-enrichment:toyota-prius-2016-usedcarscatalog:epa:toyota-prius-2016-usedcarscatalog:epa:v1:fueleconomy:37163:direct"
+          ],
+          "sources": [
+            {
+              "providerName": "FuelEconomy.gov / EPA",
+              "sourceRecordId": "37163",
+              "sourceUrl": "https://www.fueleconomy.gov/ws/rest/vehicle/37163",
+              "retrievedAt": "2026-08-12T04:03:06.693Z"
+            }
+          ]
+        }
+      ],
+      "safety": {
+        "ratingState": "RATED",
+        "sourceVehicleId": "10111",
+        "vehicleDescription": "2016 Toyota Prius 5 HB FWD",
+        "matchConfidence": 0.98,
+        "ratings": {
+          "overall": 5,
+          "frontCrash": 4,
+          "sideCrash": 5,
+          "rollover": 4,
+          "rolloverPossibilityRatio": 0.107
+        },
+        "technology": {
+          "electronicStabilityControl": "Standard",
+          "forwardCollisionWarning": "Optional",
+          "laneDepartureWarning": "No"
+        },
+        "source": {
+          "providerName": "NHTSA Safety Ratings / NCAP",
+          "sourceRecordId": "10111",
+          "sourceUrl": "https://api.nhtsa.gov/SafetyRatings/VehicleId/10111?format=json",
+          "retrievedAt": "2026-08-17T05:37:17.889Z"
+        }
+      },
+      "reliability": {
+        "assessmentId": "reliability-risk:atsjob:1.0.0",
+        "sourceInterpretationId": "reliability-interpretation:nfys3e:1.0.0",
+        "concernLevel": "MEANINGFUL_CONCERN",
+        "primaryConcerns": [
+          {
+            "component": "brakes",
+            "corroboration": "COMPLAINT_PATTERN_WITH_RECALL",
+            "confidence": "medium",
+            "evidenceCount": 25
+          },
+          {
+            "component": "electrical",
+            "corroboration": "COMPLAINT_PATTERN_WITH_RECALL",
+            "confidence": "medium",
+            "evidenceCount": 27
+          },
+          {
+            "component": "airbags",
+            "corroboration": "COMPLAINT_PATTERN_WITH_RECALL",
+            "confidence": "medium",
+            "evidenceCount": 13
+          }
+        ],
+        "evidenceConfidence": "medium",
+        "applicabilityScope": "model_year",
+        "applicabilityConfidence": "MEDIUM",
+        "exposureAvailability": "UNAVAILABLE",
+        "exposureLimitation": "179 complaint record(s) observed; exposure-adjusted complaint rate unavailable.",
+        "comparativeReliabilitySupported": false,
+        "recommendationScoringEligible": false,
+        "source": {
+          "providerName": "NHTSA recalls and complaints",
+          "sourceRecordId": "reliability-interpretation:nfys3e:1.0.0",
+          "sourceUrl": "https://www.nhtsa.gov/recalls",
+          "retrievedAt": "2026-08-17T06:07:20.276Z"
+        }
+      }
+    },
+    {
+      "vehicleId": "toyota-rav4-2016-craigslist-carstrucks-data",
+      "displayName": "2016 Toyota RAV4",
+      "publication": {
+        "publicationId": "published-cvr:14lxkp2:v2:1aylaax",
+        "recordVersion": 2,
+        "publishedAt": "2026-08-17T05:37:17.889Z"
+      },
+      "trustedFacts": [
+        {
+          "field": "bodyStyle",
+          "value": "suv",
+          "unit": "none",
+          "confidence": "medium",
+          "evidenceIds": [
+            "review-enrichment:toyota-rav4-2016-craigslist-carstrucks-data:epa:toyota-rav4-2016-craigslist-carstrucks-data:epa:v1:fueleconomy:37086:mapped"
+          ],
+          "sources": [
+            {
+              "providerName": "FuelEconomy.gov / EPA",
+              "sourceRecordId": "37086",
+              "sourceUrl": "https://www.fueleconomy.gov/ws/rest/vehicle/37086",
+              "retrievedAt": "2026-08-12T04:03:06.693Z"
+            }
+          ]
+        },
+        {
+          "field": "vehicleCategory",
+          "value": "suv",
+          "unit": "none",
+          "confidence": "medium",
+          "evidenceIds": [
+            "review-enrichment:toyota-rav4-2016-craigslist-carstrucks-data:epa:toyota-rav4-2016-craigslist-carstrucks-data:epa:v1:fueleconomy:37086:mapped"
+          ],
+          "sources": [
+            {
+              "providerName": "FuelEconomy.gov / EPA",
+              "sourceRecordId": "37086",
+              "sourceUrl": "https://www.fueleconomy.gov/ws/rest/vehicle/37086",
+              "retrievedAt": "2026-08-12T04:03:06.693Z"
+            }
+          ]
+        },
+        {
+          "field": "drivetrain",
+          "value": "FWD",
+          "unit": "none",
+          "confidence": "medium",
+          "evidenceIds": [
+            "review-enrichment:toyota-rav4-2016-craigslist-carstrucks-data:epa:toyota-rav4-2016-craigslist-carstrucks-data:epa:v1:fueleconomy:37086:mapped"
+          ],
+          "sources": [
+            {
+              "providerName": "FuelEconomy.gov / EPA",
+              "sourceRecordId": "37086",
+              "sourceUrl": "https://www.fueleconomy.gov/ws/rest/vehicle/37086",
+              "retrievedAt": "2026-08-12T04:03:06.693Z"
+            }
+          ]
+        },
+        {
+          "field": "transmission",
+          "value": "automatic",
+          "unit": "none",
+          "confidence": "medium",
+          "evidenceIds": [
+            "review-enrichment:toyota-rav4-2016-craigslist-carstrucks-data:epa:toyota-rav4-2016-craigslist-carstrucks-data:epa:v1:fueleconomy:37086:mapped"
+          ],
+          "sources": [
+            {
+              "providerName": "FuelEconomy.gov / EPA",
+              "sourceRecordId": "37086",
+              "sourceUrl": "https://www.fueleconomy.gov/ws/rest/vehicle/37086",
+              "retrievedAt": "2026-08-12T04:03:06.693Z"
+            }
+          ]
+        },
+        {
+          "field": "fuelType",
+          "value": "gas",
+          "unit": "none",
+          "confidence": "medium",
+          "evidenceIds": [
+            "review-enrichment:toyota-rav4-2016-craigslist-carstrucks-data:epa:toyota-rav4-2016-craigslist-carstrucks-data:epa:v1:fueleconomy:37086:mapped"
+          ],
+          "sources": [
+            {
+              "providerName": "FuelEconomy.gov / EPA",
+              "sourceRecordId": "37086",
+              "sourceUrl": "https://www.fueleconomy.gov/ws/rest/vehicle/37086",
+              "retrievedAt": "2026-08-12T04:03:06.693Z"
+            }
+          ]
+        },
+        {
+          "field": "fuelEconomy",
+          "value": 25,
+          "unit": "mpg",
+          "confidence": "high",
+          "evidenceIds": [
+            "review-enrichment:toyota-rav4-2016-craigslist-carstrucks-data:epa:toyota-rav4-2016-craigslist-carstrucks-data:epa:v1:fueleconomy:37086:direct"
+          ],
+          "sources": [
+            {
+              "providerName": "FuelEconomy.gov / EPA",
+              "sourceRecordId": "37086",
+              "sourceUrl": "https://www.fueleconomy.gov/ws/rest/vehicle/37086",
+              "retrievedAt": "2026-08-12T04:03:06.693Z"
+            }
+          ]
+        },
+        {
+          "field": "emissions",
+          "value": 349,
+          "unit": "grams_co2e_per_mile",
+          "confidence": "high",
+          "evidenceIds": [
+            "review-enrichment:toyota-rav4-2016-craigslist-carstrucks-data:epa:toyota-rav4-2016-craigslist-carstrucks-data:epa:v1:fueleconomy:37086:direct"
+          ],
+          "sources": [
+            {
+              "providerName": "FuelEconomy.gov / EPA",
+              "sourceRecordId": "37086",
+              "sourceUrl": "https://www.fueleconomy.gov/ws/rest/vehicle/37086",
+              "retrievedAt": "2026-08-12T04:03:06.693Z"
+            }
+          ]
+        }
+      ],
+      "safety": {
+        "ratingState": "RATED",
+        "sourceVehicleId": "10114",
+        "vehicleDescription": "2016 Toyota Rav4 SUV FWD",
+        "matchConfidence": 0.98,
+        "ratings": {
+          "overall": 5,
+          "frontCrash": 4,
+          "sideCrash": 5,
+          "rollover": 4,
+          "rolloverPossibilityRatio": 0.174
+        },
+        "technology": {
+          "electronicStabilityControl": "Standard",
+          "forwardCollisionWarning": "Optional",
+          "laneDepartureWarning": "No"
+        },
+        "source": {
+          "providerName": "NHTSA Safety Ratings / NCAP",
+          "sourceRecordId": "10114",
+          "sourceUrl": "https://api.nhtsa.gov/SafetyRatings/VehicleId/10114?format=json",
+          "retrievedAt": "2026-08-17T05:37:17.889Z"
+        }
+      },
+      "reliability": {
+        "assessmentId": "reliability-risk:s9qah8:1.0.0",
+        "sourceInterpretationId": "reliability-interpretation:19y7i1u:1.0.0",
+        "concernLevel": "MEANINGFUL_CONCERN",
+        "primaryConcerns": [
+          {
+            "component": "brakes",
+            "corroboration": "COMPLAINT_PATTERN_WITH_RECALL",
+            "confidence": "medium",
+            "evidenceCount": 46
+          },
+          {
+            "component": "electrical",
+            "corroboration": "COMPLAINT_PATTERN_WITH_RECALL",
+            "confidence": "medium",
+            "evidenceCount": 57
+          },
+          {
+            "component": "engine",
+            "corroboration": "REPEATED_ALLEGATIONS",
+            "confidence": "low",
+            "evidenceCount": 24
+          }
+        ],
+        "evidenceConfidence": "medium",
+        "applicabilityScope": "model_year",
+        "applicabilityConfidence": "MEDIUM",
+        "exposureAvailability": "UNAVAILABLE",
+        "exposureLimitation": "234 complaint record(s) observed; exposure-adjusted complaint rate unavailable.",
+        "comparativeReliabilitySupported": false,
+        "recommendationScoringEligible": false,
+        "source": {
+          "providerName": "NHTSA recalls and complaints",
+          "sourceRecordId": "reliability-interpretation:19y7i1u:1.0.0",
+          "sourceUrl": "https://www.nhtsa.gov/recalls",
+          "retrievedAt": "2026-08-17T06:07:20.276Z"
+        }
+      }
+    },
+    {
+      "vehicleId": "honda-cr-v-2016-craigslist-carstrucks-data",
+      "displayName": "2016 Honda CR-V",
+      "publication": {
+        "publicationId": "published-cvr:c2wwzt:v2:fnlugm",
+        "recordVersion": 2,
+        "publishedAt": "2026-08-17T05:37:17.889Z"
+      },
+      "trustedFacts": [
+        {
+          "field": "bodyStyle",
+          "value": "suv",
+          "unit": "none",
+          "confidence": "medium",
+          "evidenceIds": [
+            "review-enrichment:honda-cr-v-2016-craigslist-carstrucks-data:epa:honda-cr-v-2016-craigslist-carstrucks-data:epa:v1:fueleconomy:37024:mapped"
+          ],
+          "sources": [
+            {
+              "providerName": "FuelEconomy.gov / EPA",
+              "sourceRecordId": "37024",
+              "sourceUrl": "https://www.fueleconomy.gov/ws/rest/vehicle/37024",
+              "retrievedAt": "2026-08-12T04:03:06.693Z"
+            }
+          ]
+        },
+        {
+          "field": "vehicleCategory",
+          "value": "suv",
+          "unit": "none",
+          "confidence": "medium",
+          "evidenceIds": [
+            "review-enrichment:honda-cr-v-2016-craigslist-carstrucks-data:epa:honda-cr-v-2016-craigslist-carstrucks-data:epa:v1:fueleconomy:37024:mapped"
+          ],
+          "sources": [
+            {
+              "providerName": "FuelEconomy.gov / EPA",
+              "sourceRecordId": "37024",
+              "sourceUrl": "https://www.fueleconomy.gov/ws/rest/vehicle/37024",
+              "retrievedAt": "2026-08-12T04:03:06.693Z"
+            }
+          ]
+        },
+        {
+          "field": "drivetrain",
+          "value": "AWD",
+          "unit": "none",
+          "confidence": "medium",
+          "evidenceIds": [
+            "review-enrichment:honda-cr-v-2016-craigslist-carstrucks-data:epa:honda-cr-v-2016-craigslist-carstrucks-data:epa:v1:fueleconomy:37024:mapped"
+          ],
+          "sources": [
+            {
+              "providerName": "FuelEconomy.gov / EPA",
+              "sourceRecordId": "37024",
+              "sourceUrl": "https://www.fueleconomy.gov/ws/rest/vehicle/37024",
+              "retrievedAt": "2026-08-12T04:03:06.693Z"
+            }
+          ]
+        },
+        {
+          "field": "transmission",
+          "value": "cvt",
+          "unit": "none",
+          "confidence": "medium",
+          "evidenceIds": [
+            "review-enrichment:honda-cr-v-2016-craigslist-carstrucks-data:epa:honda-cr-v-2016-craigslist-carstrucks-data:epa:v1:fueleconomy:37024:mapped"
+          ],
+          "sources": [
+            {
+              "providerName": "FuelEconomy.gov / EPA",
+              "sourceRecordId": "37024",
+              "sourceUrl": "https://www.fueleconomy.gov/ws/rest/vehicle/37024",
+              "retrievedAt": "2026-08-12T04:03:06.693Z"
+            }
+          ]
+        },
+        {
+          "field": "fuelType",
+          "value": "gas",
+          "unit": "none",
+          "confidence": "medium",
+          "evidenceIds": [
+            "review-enrichment:honda-cr-v-2016-craigslist-carstrucks-data:epa:honda-cr-v-2016-craigslist-carstrucks-data:epa:v1:fueleconomy:37024:mapped"
+          ],
+          "sources": [
+            {
+              "providerName": "FuelEconomy.gov / EPA",
+              "sourceRecordId": "37024",
+              "sourceUrl": "https://www.fueleconomy.gov/ws/rest/vehicle/37024",
+              "retrievedAt": "2026-08-12T04:03:06.693Z"
+            }
+          ]
+        },
+        {
+          "field": "fuelEconomy",
+          "value": 27,
+          "unit": "mpg",
+          "confidence": "high",
+          "evidenceIds": [
+            "review-enrichment:honda-cr-v-2016-craigslist-carstrucks-data:epa:honda-cr-v-2016-craigslist-carstrucks-data:epa:v1:fueleconomy:37024:direct"
+          ],
+          "sources": [
+            {
+              "providerName": "FuelEconomy.gov / EPA",
+              "sourceRecordId": "37024",
+              "sourceUrl": "https://www.fueleconomy.gov/ws/rest/vehicle/37024",
+              "retrievedAt": "2026-08-12T04:03:06.693Z"
+            }
+          ]
+        },
+        {
+          "field": "emissions",
+          "value": 326,
+          "unit": "grams_co2e_per_mile",
+          "confidence": "high",
+          "evidenceIds": [
+            "review-enrichment:honda-cr-v-2016-craigslist-carstrucks-data:epa:honda-cr-v-2016-craigslist-carstrucks-data:epa:v1:fueleconomy:37024:direct"
+          ],
+          "sources": [
+            {
+              "providerName": "FuelEconomy.gov / EPA",
+              "sourceRecordId": "37024",
+              "sourceUrl": "https://www.fueleconomy.gov/ws/rest/vehicle/37024",
+              "retrievedAt": "2026-08-12T04:03:06.693Z"
+            }
+          ]
+        }
+      ],
+      "safety": {
+        "ratingState": "RATED",
+        "sourceVehicleId": "10170",
+        "vehicleDescription": "2016 Honda CR-V SUV AWD",
+        "matchConfidence": 0.98,
+        "ratings": {
+          "overall": 5,
+          "frontCrash": 5,
+          "sideCrash": 5,
+          "rollover": 4,
+          "rolloverPossibilityRatio": 0.174
+        },
+        "technology": {
+          "electronicStabilityControl": "Standard",
+          "forwardCollisionWarning": "Optional",
+          "laneDepartureWarning": "Optional"
+        },
+        "source": {
+          "providerName": "NHTSA Safety Ratings / NCAP",
+          "sourceRecordId": "10170",
+          "sourceUrl": "https://api.nhtsa.gov/SafetyRatings/VehicleId/10170?format=json",
+          "retrievedAt": "2026-08-17T05:37:17.889Z"
+        }
+      },
+      "reliability": {
+        "assessmentId": "reliability-risk:ccuaq3:1.0.0",
+        "sourceInterpretationId": "reliability-interpretation:5cxmez:1.0.0",
+        "concernLevel": "MEANINGFUL_CONCERN",
+        "primaryConcerns": [
+          {
+            "component": "engine",
+            "corroboration": "COMPLAINT_PATTERN_WITH_RECALL",
+            "confidence": "medium",
+            "evidenceCount": 102
+          },
+          {
+            "component": "fuel_system",
+            "corroboration": "COMPLAINT_PATTERN_WITH_RECALL",
+            "confidence": "medium",
+            "evidenceCount": 73
+          },
+          {
+            "component": "airbags",
+            "corroboration": "COMPLAINT_PATTERN_WITH_RECALL",
+            "confidence": "medium",
+            "evidenceCount": 33
+          }
+        ],
+        "evidenceConfidence": "medium",
+        "applicabilityScope": "model_year",
+        "applicabilityConfidence": "MEDIUM",
+        "exposureAvailability": "UNAVAILABLE",
+        "exposureLimitation": "389 complaint record(s) observed; exposure-adjusted complaint rate unavailable.",
+        "comparativeReliabilitySupported": false,
+        "recommendationScoringEligible": false,
+        "source": {
+          "providerName": "NHTSA recalls and complaints",
+          "sourceRecordId": "reliability-interpretation:5cxmez:1.0.0",
+          "sourceUrl": "https://www.nhtsa.gov/recalls",
+          "retrievedAt": "2026-08-17T06:07:20.276Z"
+        }
+      }
+    },
+    {
+      "vehicleId": "nissan-leaf-2018-craigslist-carstrucks-data",
+      "displayName": "2018 Nissan Leaf",
+      "publication": {
+        "publicationId": "published-cvr:puncbp:v1:4iksm1",
+        "recordVersion": 1,
+        "publishedAt": "2026-08-14T05:04:59.094Z"
+      },
+      "trustedFacts": [
+        {
+          "field": "vehicleCategory",
+          "value": "midsize_car",
+          "unit": "none",
+          "confidence": "medium",
+          "evidenceIds": [
+            "review-enrichment:nissan-leaf-2018-craigslist-carstrucks-data:epa:nissan-leaf-2018-craigslist-carstrucks-data:epa:v1:fueleconomy:39860:mapped"
+          ],
+          "sources": [
+            {
+              "providerName": "FuelEconomy.gov / EPA",
+              "sourceRecordId": "39860",
+              "sourceUrl": "https://www.fueleconomy.gov/ws/rest/vehicle/39860",
+              "retrievedAt": "2026-08-12T04:03:06.693Z"
+            }
+          ]
+        },
+        {
+          "field": "drivetrain",
+          "value": "FWD",
+          "unit": "none",
+          "confidence": "medium",
+          "evidenceIds": [
+            "review-enrichment:nissan-leaf-2018-craigslist-carstrucks-data:epa:nissan-leaf-2018-craigslist-carstrucks-data:epa:v1:fueleconomy:39860:mapped"
+          ],
+          "sources": [
+            {
+              "providerName": "FuelEconomy.gov / EPA",
+              "sourceRecordId": "39860",
+              "sourceUrl": "https://www.fueleconomy.gov/ws/rest/vehicle/39860",
+              "retrievedAt": "2026-08-12T04:03:06.693Z"
+            }
+          ]
+        },
+        {
+          "field": "transmission",
+          "value": "automatic",
+          "unit": "none",
+          "confidence": "medium",
+          "evidenceIds": [
+            "review-enrichment:nissan-leaf-2018-craigslist-carstrucks-data:epa:nissan-leaf-2018-craigslist-carstrucks-data:epa:v1:fueleconomy:39860:mapped"
+          ],
+          "sources": [
+            {
+              "providerName": "FuelEconomy.gov / EPA",
+              "sourceRecordId": "39860",
+              "sourceUrl": "https://www.fueleconomy.gov/ws/rest/vehicle/39860",
+              "retrievedAt": "2026-08-12T04:03:06.693Z"
+            }
+          ]
+        },
+        {
+          "field": "fuelType",
+          "value": "electric",
+          "unit": "none",
+          "confidence": "medium",
+          "evidenceIds": [
+            "review-enrichment:nissan-leaf-2018-craigslist-carstrucks-data:epa:nissan-leaf-2018-craigslist-carstrucks-data:epa:v1:fueleconomy:39860:mapped"
+          ],
+          "sources": [
+            {
+              "providerName": "FuelEconomy.gov / EPA",
+              "sourceRecordId": "39860",
+              "sourceUrl": "https://www.fueleconomy.gov/ws/rest/vehicle/39860",
+              "retrievedAt": "2026-08-12T04:03:06.693Z"
+            }
+          ]
+        },
+        {
+          "field": "fuelEconomy",
+          "value": 30.0011,
+          "unit": "kwh_per_100_miles",
+          "confidence": "high",
+          "evidenceIds": [
+            "review-enrichment:nissan-leaf-2018-craigslist-carstrucks-data:epa:nissan-leaf-2018-craigslist-carstrucks-data:epa:v1:fueleconomy:39860:direct"
+          ],
+          "sources": [
+            {
+              "providerName": "FuelEconomy.gov / EPA",
+              "sourceRecordId": "39860",
+              "sourceUrl": "https://www.fueleconomy.gov/ws/rest/vehicle/39860",
+              "retrievedAt": "2026-08-12T04:03:06.693Z"
+            }
+          ]
+        },
+        {
+          "field": "emissions",
+          "value": 0,
+          "unit": "grams_co2e_per_mile",
+          "confidence": "high",
+          "evidenceIds": [
+            "review-enrichment:nissan-leaf-2018-craigslist-carstrucks-data:epa:nissan-leaf-2018-craigslist-carstrucks-data:epa:v1:fueleconomy:39860:direct"
+          ],
+          "sources": [
+            {
+              "providerName": "FuelEconomy.gov / EPA",
+              "sourceRecordId": "39860",
+              "sourceUrl": "https://www.fueleconomy.gov/ws/rest/vehicle/39860",
+              "retrievedAt": "2026-08-12T04:03:06.693Z"
+            }
+          ]
+        },
+        {
+          "field": "evRange",
+          "value": 151,
+          "unit": "miles",
+          "confidence": "high",
+          "evidenceIds": [
+            "review-enrichment:nissan-leaf-2018-craigslist-carstrucks-data:epa:nissan-leaf-2018-craigslist-carstrucks-data:epa:v1:fueleconomy:39860:direct"
+          ],
+          "sources": [
+            {
+              "providerName": "FuelEconomy.gov / EPA",
+              "sourceRecordId": "39860",
+              "sourceUrl": "https://www.fueleconomy.gov/ws/rest/vehicle/39860",
+              "retrievedAt": "2026-08-12T04:03:06.693Z"
+            }
+          ]
+        }
+      ],
+      "safety": {
+        "ratingState": "NOT_RATED",
+        "sourceVehicleId": "12789",
+        "vehicleDescription": "2018 Nissan Leaf BEV 5 HB FWD",
+        "matchConfidence": 0.98,
+        "ratings": {
+          "overall": null,
+          "frontCrash": null,
+          "sideCrash": null,
+          "rollover": null,
+          "rolloverPossibilityRatio": 0
+        },
+        "technology": {
+          "electronicStabilityControl": "Standard",
+          "forwardCollisionWarning": "No",
+          "laneDepartureWarning": "No"
+        },
+        "source": {
+          "providerName": "NHTSA Safety Ratings / NCAP",
+          "sourceRecordId": "12789",
+          "sourceUrl": "https://api.nhtsa.gov/SafetyRatings/VehicleId/12789?format=json",
+          "retrievedAt": "2026-08-17T05:37:17.889Z"
+        }
+      },
+      "reliability": {
+        "assessmentId": "reliability-risk:1ast3c8:1.0.0",
+        "sourceInterpretationId": "reliability-interpretation:lvr7n8:1.0.0",
+        "concernLevel": "MEANINGFUL_CONCERN",
+        "primaryConcerns": [
+          {
+            "component": "engine",
+            "corroboration": "REPEATED_ALLEGATIONS",
+            "confidence": "low",
+            "evidenceCount": 6
+          },
+          {
+            "component": "powertrain",
+            "corroboration": "REPEATED_ALLEGATIONS",
+            "confidence": "low",
+            "evidenceCount": 3
+          },
+          {
+            "component": "brakes",
+            "corroboration": "REPEATED_ALLEGATIONS",
+            "confidence": "low",
+            "evidenceCount": 19
+          }
+        ],
+        "evidenceConfidence": "low",
+        "applicabilityScope": "model_year",
+        "applicabilityConfidence": "MEDIUM",
+        "exposureAvailability": "UNAVAILABLE",
+        "exposureLimitation": "66 complaint record(s) observed; exposure-adjusted complaint rate unavailable.",
+        "comparativeReliabilitySupported": false,
+        "recommendationScoringEligible": false,
+        "source": {
+          "providerName": "NHTSA recalls and complaints",
+          "sourceRecordId": "reliability-interpretation:lvr7n8:1.0.0",
+          "sourceUrl": "https://www.nhtsa.gov/recalls",
+          "retrievedAt": "2026-08-17T06:07:20.276Z"
+        }
+      }
+    }
+  ]
+}
