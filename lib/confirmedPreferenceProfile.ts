@@ -117,7 +117,7 @@ export function createConfirmedPreferenceProfile(
     const mapping = mappingsByDestination.get(field);
     const confidence = session.accumulatedInterpretation.confidenceByField.find((entry) => entry.field === field);
     const certainty: ConfirmationCertainty = fact && confidence?.confidence === "high" && !confidence.requiresConfirmation ? "confirmed" : "inferred";
-    const evidencePhrase = fact?.evidencePhrase || inference?.evidencePhrase || confidence?.evidencePhrase || "";
+    const evidencePhrase = mapping?.sourceText || fact?.evidencePhrase || inference?.evidencePhrase || confidence?.evidencePhrase || "";
     const sourceTurn = findSourceTurn(session.conversationTurns, evidencePhrase);
     items.push({
       id: `field:${field}`,
@@ -403,11 +403,30 @@ function deriveProfileCollections(draft: ConfirmedPreferenceProfile): ConfirmedP
 }
 
 function shouldCarryForward(previous: ConfirmedPreferenceItem, next?: ConfirmedPreferenceItem) {
+  if (next && nextShouldReplacePrevious(previous, next)) return false;
   return (
     previous.userEdited ||
     previous.certainty === "confirmed" ||
     Boolean(next && previous.constraintStrength !== next.constraintStrength)
   );
+}
+
+function nextShouldReplacePrevious(
+  previous: ConfirmedPreferenceItem,
+  next: ConfirmedPreferenceItem,
+) {
+  if (next.certainty === "assumed_default" || next.certainty === "needs_answer") return false;
+  if (previous.certainty === "assumed_default") return true;
+
+  const previousSequence = sourceTurnSequence(previous.sourceTurnId);
+  const nextSequence = sourceTurnSequence(next.sourceTurnId);
+  return nextSequence !== undefined
+    && (previousSequence === undefined || nextSequence > previousSequence);
+}
+
+function sourceTurnSequence(sourceTurnId: string | undefined) {
+  const sequence = sourceTurnId?.match(/^turn-(\d+)$/)?.[1];
+  return sequence ? Number(sequence) : undefined;
 }
 
 function addMissingOrDefaultItems(

@@ -728,7 +728,7 @@ export function BuyerProfilePlanner() {
   return (
     <main className="min-h-screen bg-slate-950 text-slate-100">
       <div className="mx-auto grid w-full max-w-[1500px] gap-6 px-4 py-5 md:px-7">
-        <header className="sticky top-0 z-20 -mx-4 border-b border-white/10 bg-slate-950/80 px-4 py-3 backdrop-blur-xl md:-mx-7 md:px-7">
+        <header className="relative z-20 -mx-4 border-b border-white/10 bg-slate-950/80 px-4 py-3 backdrop-blur-xl md:sticky md:top-0 md:-mx-7 md:px-7">
           <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
             <div>
               <p className="text-xs font-black uppercase tracking-[0.18em] text-cyan-300">Personalized Car Advisor</p>
@@ -1199,7 +1199,7 @@ function FineTuneDetailsPanel({
 
   return (
     <details
-      className="group rounded-lg border border-white/10 bg-white/[0.035] p-4 shadow-[0_18px_60px_rgba(0,0,0,0.16)] backdrop-blur md:p-5"
+      className="group min-w-0 rounded-lg border border-white/10 bg-white/[0.035] p-4 shadow-[0_18px_60px_rgba(0,0,0,0.16)] backdrop-blur md:p-5"
       onToggle={(event) => onOpenChange(event.currentTarget.open)}
       open={isOpen}
       ref={fineTuneRef}
@@ -1217,8 +1217,8 @@ function FineTuneDetailsPanel({
         </span>
       </summary>
 
-      <div className="mt-5 grid gap-4 border-t border-white/10 pt-5">
-        <section className="grid gap-3 rounded-lg border border-cyan-200/15 bg-cyan-200/[0.055] p-4">
+      <div className="mt-5 grid min-w-0 gap-4 border-t border-white/10 pt-5">
+        <section className="grid min-w-0 gap-3 rounded-lg border border-cyan-200/15 bg-cyan-200/[0.055] p-4">
           <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
             <div>
               <p className="text-xs font-black uppercase tracking-[0.14em] text-cyan-200">Preference Source</p>
@@ -1245,7 +1245,7 @@ function FineTuneDetailsPanel({
           </div>
           {hasChanges ? (
             <div className="rounded-lg border border-amber-300/20 bg-amber-300/[0.08] p-3">
-              <p className="text-sm font-bold leading-6 text-amber-50">{unsavedSummary.message}</p>
+              <p className="break-words text-sm font-bold leading-6 text-amber-50">{unsavedSummary.message}</p>
             </div>
           ) : null}
           {lastFineTuneSummary ? (
@@ -1265,7 +1265,7 @@ function FineTuneDetailsPanel({
           ) : null}
         </section>
 
-        <div className="grid gap-4 xl:grid-cols-2">
+        <div className="grid min-w-0 gap-4 xl:grid-cols-2">
           <QuestionGroup title="Budget">
             <NumberField label="Purchase budget" meta={metadata.maxPurchaseBudget} field="maxPurchaseBudget" step={500} profile={profile} setProfile={(next) => update("maxPurchaseBudget", next)} />
             <NumberField label="Monthly budget" meta={metadata.monthlyBudget} field="monthlyBudget" step={25} profile={profile} setProfile={(next) => update("monthlyBudget", next)} />
@@ -2211,13 +2211,13 @@ function NavButton({ active, children, onClick }: { active: boolean; children: R
 
 function QuestionGroup({ title, children }: { title: string; children: ReactNode }) {
   return (
-    <details className="group rounded-lg border border-white/10 bg-slate-950/35 p-3" open>
+    <details className="group min-w-0 rounded-lg border border-white/10 bg-slate-950/35 p-3" open>
       <summary className="flex min-h-9 cursor-pointer list-none items-center justify-between gap-3 text-xs font-black uppercase tracking-[0.12em] text-slate-400">
         {title}
         <span className="text-slate-500 group-open:hidden">Open</span>
         <span className="hidden text-slate-500 group-open:inline">Close</span>
       </summary>
-      <div className="mt-3 grid gap-3 sm:grid-cols-2">{children}</div>
+      <div className="mt-3 grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2">{children}</div>
     </details>
   );
 }
@@ -2240,10 +2240,10 @@ function NumberField({
   setProfile: (profile: BuyerProfile) => void;
 }) {
   return (
-    <label className="grid gap-1.5 text-xs font-black uppercase tracking-[0.1em] text-slate-400">
+    <label className="grid min-w-0 gap-1.5 text-xs font-black uppercase tracking-[0.1em] text-slate-400">
       <span>{label}</span>
       <input
-        className="h-11 rounded-lg border border-white/10 bg-slate-950/50 px-3 text-sm font-extrabold text-white outline-none transition focus:border-cyan-300/80 focus:ring-4 focus:ring-cyan-300/15"
+        className="h-11 min-w-0 w-full rounded-lg border border-white/10 bg-slate-950/50 px-3 text-sm font-extrabold text-white outline-none transition focus:border-cyan-300/80 focus:ring-4 focus:ring-cyan-300/15"
         min={0}
         onChange={(event) => setProfile({ ...profile, [field]: Number(event.target.value) || 0 })}
         step={step}
@@ -2348,10 +2348,10 @@ function SelectField({
   options: Array<[string, string]>;
 }) {
   return (
-    <label className="grid gap-1.5 text-xs font-black uppercase tracking-[0.1em] text-slate-400">
+    <label className="grid min-w-0 gap-1.5 text-xs font-black uppercase tracking-[0.1em] text-slate-400">
       <span>{label}</span>
       <select
-        className="h-11 rounded-lg border border-white/10 bg-slate-950/50 px-3 text-sm font-extrabold text-white outline-none transition focus:border-cyan-300/80 focus:ring-4 focus:ring-cyan-300/15"
+        className="h-11 min-w-0 w-full rounded-lg border border-white/10 bg-slate-950/50 px-3 text-sm font-extrabold text-white outline-none transition focus:border-cyan-300/80 focus:ring-4 focus:ring-cyan-300/15"
         onChange={(event) => onChange(event.target.value)}
         value={value}
       >
@@ -2386,18 +2386,18 @@ function MakePreferenceField({
   }, [makeValue, strength]);
 
   return (
-    <div className="grid gap-1.5 text-xs font-black uppercase tracking-[0.1em] text-slate-400">
+    <div className="grid min-w-0 gap-1.5 text-xs font-black uppercase tracking-[0.1em] text-slate-400">
       <span>Make</span>
-      <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_150px]">
+      <div className="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-[minmax(0,1fr)_150px]">
         <input
-          className="h-11 rounded-lg border border-white/10 bg-slate-950/50 px-3 text-sm font-extrabold normal-case tracking-normal text-white outline-none transition focus:border-cyan-300/80 focus:ring-4 focus:ring-cyan-300/15"
+          className="h-11 min-w-0 w-full rounded-lg border border-white/10 bg-slate-950/50 px-3 text-sm font-extrabold normal-case tracking-normal text-white outline-none transition focus:border-cyan-300/80 focus:ring-4 focus:ring-cyan-300/15"
           onBlur={() => onChange(draftMake, draftStrength)}
           onChange={(event) => setDraftMake(event.target.value)}
           placeholder="Any make"
           value={draftMake}
         />
         <select
-          className="h-11 rounded-lg border border-white/10 bg-slate-950/50 px-3 text-sm font-extrabold text-white outline-none transition focus:border-cyan-300/80 focus:ring-4 focus:ring-cyan-300/15"
+          className="h-11 min-w-0 w-full rounded-lg border border-white/10 bg-slate-950/50 px-3 text-sm font-extrabold text-white outline-none transition focus:border-cyan-300/80 focus:ring-4 focus:ring-cyan-300/15"
           onChange={(event) => {
             const nextStrength = event.target.value as ConstraintStrength | "not-set";
             setDraftStrength(nextStrength);

@@ -36,6 +36,7 @@
     "scripts/test_preference_interpretation.ts",
     "scripts/test_conversation_intake.ts",
     "scripts/test_confirmation_flow.ts",
+    "scripts/test_budget_state_regression.ts",
     "scripts/test_confirmed_profile_integration.ts",
     "scripts/test_fine_tune_sync.ts",
     "scripts/test_canonical_vehicle_record.ts",
