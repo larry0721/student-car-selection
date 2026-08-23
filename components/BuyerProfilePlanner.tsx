@@ -22,6 +22,7 @@ import {
   skipConversationQuestion,
   type ConversationIntakeSession,
 } from "@/lib/conversationIntake";
+import { deriveAdvisorConversationState, validateConversationTransition } from "@/lib/conversationState";
 import {
   approveConfirmedPreferenceProfile,
   carryForwardConfirmedPreferenceDraft,
@@ -381,7 +382,13 @@ export function BuyerProfilePlanner() {
   function askAnotherIntakeQuestion() {
     if (!intakeSession) return;
     clearCurrentSearchResult();
-    setIntakeSession(requestAnotherConversationQuestion(intakeSession));
+    const nextSession = requestAnotherConversationQuestion(intakeSession);
+    const transitionDiagnostics = validateConversationTransition(intakeSession, "CONTINUE_CLARIFICATION", nextSession);
+    setIntakeSession(
+      transitionDiagnostics.some((item) => item.code === "NO_OP_TRANSITION")
+        ? { ...nextSession, intakeStatus: "recoverable_error" }
+        : nextSession,
+    );
     setApprovedPreferenceProfile(null);
     setConfirmedProfileConversion(null);
   }
@@ -1493,6 +1500,10 @@ function PreferenceInterpretationPanel({
     session.accumulatedInterpretation.suggestedProfileUpdates,
     vehicleCatalog,
   ).terminalNoMatch;
+  const activeConversationState = deriveAdvisorConversationState({ session });
+  const canAnswerClarification = activeConversationState.validActions.includes("ANSWER_CLARIFICATION")
+    && Boolean(activeConversationState.pendingClarification);
+  const canSkipClarification = activeConversationState.validActions.includes("SKIP_CLARIFICATION");
   const advisorContinuityMessage =
     latestAdvisorTurn && currentQuestion && session.conversationTurns.length > 2
       ? latestAdvisorTurn.text.replace(currentQuestion?.text || "", "").trim()
@@ -1571,7 +1582,7 @@ function PreferenceInterpretationPanel({
         </div>
       ) : null}
 
-      {!outOfScopeMessage && currentQuestion ? (
+      {!outOfScopeMessage && canAnswerClarification && currentQuestion ? (
         <div className="rounded-lg border border-cyan-200/15 bg-cyan-200/[0.06] p-4">
           <p className="text-xs font-black uppercase tracking-[0.14em] text-cyan-200">Next question</p>
           <p className="mt-2 text-base font-black leading-7 text-white">{currentQuestion.text}</p>
@@ -1579,7 +1590,7 @@ function PreferenceInterpretationPanel({
       ) : null}
 
       <div className="flex flex-col gap-2 sm:flex-row">
-        {!outOfScopeMessage && currentQuestion ? (
+        {!outOfScopeMessage && canAnswerClarification && currentQuestion ? (
           <>
             <button
               className="min-h-11 rounded-lg border border-cyan-300/40 bg-cyan-300 px-4 text-sm font-black text-slate-950 transition hover:bg-cyan-200"
@@ -1588,13 +1599,13 @@ function PreferenceInterpretationPanel({
             >
               Answer
             </button>
-            <button
+            {canSkipClarification ? <button
               className="min-h-11 rounded-lg border border-white/10 bg-white/[0.05] px-4 text-sm font-black text-slate-200 transition hover:border-cyan-300/50 hover:bg-cyan-300/10"
               onClick={skipQuestion}
               type="button"
             >
               Skip
-            </button>
+            </button> : null}
           </>
         ) : null}
         <button
@@ -1606,7 +1617,7 @@ function PreferenceInterpretationPanel({
         </button>
       </div>
 
-      {!outOfScopeMessage && showAnswerInput && currentQuestion ? (
+      {!outOfScopeMessage && showAnswerInput && canAnswerClarification && currentQuestion ? (
         <label className="grid gap-2 text-sm font-black text-slate-200" htmlFor="clarifying-answer">
           <span>{currentQuestion.text}</span>
           <textarea
@@ -1641,6 +1652,7 @@ function PreferenceInterpretationPanel({
           approvedDraft={approvedDraft}
           draft={confirmationDraft}
           isRecommendationRunning={isRecommendationRunning}
+          session={session}
           terminalCatalogNoMatch={terminalCatalogNoMatch}
           onApprove={approveDraft}
           onAskAnotherQuestion={askAnotherQuestion}
@@ -1656,6 +1668,7 @@ function ConfirmationProfilePanel({
   approvedDraft,
   draft,
   isRecommendationRunning,
+  session,
   terminalCatalogNoMatch,
   onApprove,
   onAskAnotherQuestion,
@@ -1665,6 +1678,7 @@ function ConfirmationProfilePanel({
   approvedDraft: ConfirmedPreferenceProfile | null;
   draft: ConfirmedPreferenceProfile;
   isRecommendationRunning: boolean;
+  session: ConversationIntakeSession;
   terminalCatalogNoMatch: boolean;
   onApprove: (draft: ConfirmedPreferenceProfile) => Promise<void> | void;
   onAskAnotherQuestion: () => void;
@@ -1676,6 +1690,20 @@ function ConfirmationProfilePanel({
   const hasBlockingIssue = hasBlockingConfirmationIssue(draft) && !terminalCatalogNoMatch;
   const readiness = assessConfirmedPreferenceDraftReadiness(draft);
   const communication = buildConfirmationCommunicationViewModel(draft, readiness);
+  const conversationState = deriveAdvisorConversationState({
+    session,
+    confirmationPayloadExists: true,
+    blockingClarificationCount: hasBlockingIssue || !readiness.ready ? 1 : 0,
+    profileIsRecommendationValid: !hasBlockingIssue && readiness.ready,
+    profileApproved: Boolean(approvedDraft?.userApproved),
+    unsupportedReason: communication.readinessMessage,
+  });
+  const canConfirm = conversationState.validActions.includes("CONFIRM_PROFILE");
+  const canContinueClarification = conversationState.validActions.includes("CONTINUE_CLARIFICATION")
+    && Boolean(conversationState.pendingClarification);
+  const canRetry = conversationState.validActions.includes("RETRY");
+  const explainsUnsupported = conversationState.kind === "EXPLAIN_UNSUPPORTED";
+  const hasRecoverableError = conversationState.kind === "RECOVERABLE_ERROR";
 
   function startEdit(item: ConfirmedPreferenceItem) {
     setEditingItemId(item.id);
@@ -1845,8 +1873,26 @@ function ConfirmationProfilePanel({
         </div>
       ) : null}
 
+      {explainsUnsupported ? (
+        <div className="rounded-lg border border-white/10 bg-white/[0.04] p-4">
+          <p className="text-sm font-black text-white">I can’t narrow this responsibly from the remaining information.</p>
+          <p className="mt-1 text-sm font-semibold leading-6 text-slate-300">
+            {conversationState.unsupportedReason} Review the supported preferences above or start over with a different request.
+          </p>
+        </div>
+      ) : null}
+
+      {hasRecoverableError ? (
+        <div className="rounded-lg border border-rose-300/20 bg-rose-300/[0.07] p-4">
+          <p className="text-sm font-black text-rose-50">I couldn’t advance that step safely.</p>
+          <p className="mt-1 text-sm font-semibold leading-6 text-rose-50/80">
+            Try the step again, review the preferences above, or start over.
+          </p>
+        </div>
+      ) : null}
+
       <div className="flex flex-col gap-2 sm:flex-row">
-        {!hasBlockingIssue && readiness.ready ? (
+        {canConfirm ? (
           <button
             className="min-h-11 rounded-lg border border-cyan-300/40 bg-cyan-300 px-4 text-sm font-black text-slate-950 transition hover:bg-cyan-200 disabled:cursor-not-allowed disabled:border-white/10 disabled:bg-white/[0.05] disabled:text-slate-500"
             disabled={isRecommendationRunning}
@@ -1855,7 +1901,7 @@ function ConfirmationProfilePanel({
           >
             {isRecommendationRunning ? "Checking cars" : "Find Cars"}
           </button>
-        ) : (
+        ) : canContinueClarification ? (
           <button
             className="min-h-11 rounded-lg border border-cyan-300/40 bg-cyan-300 px-4 text-sm font-black text-slate-950 transition hover:bg-cyan-200"
             onClick={onAskAnotherQuestion}
@@ -1863,14 +1909,23 @@ function ConfirmationProfilePanel({
           >
             Answer one more question
           </button>
-        )}
-        {!hasBlockingIssue && readiness.ready ? (
+        ) : null}
+        {canConfirm && canContinueClarification ? (
           <button
             className="min-h-11 rounded-lg border border-white/10 bg-white/[0.05] px-4 text-sm font-black text-slate-200 transition hover:border-cyan-300/50 hover:bg-cyan-300/10"
             onClick={onAskAnotherQuestion}
             type="button"
           >
             Ask another question
+          </button>
+        ) : null}
+        {canRetry ? (
+          <button
+            className="min-h-11 rounded-lg border border-cyan-300/40 bg-cyan-300 px-4 text-sm font-black text-slate-950 transition hover:bg-cyan-200"
+            onClick={onAskAnotherQuestion}
+            type="button"
+          >
+            Retry
           </button>
         ) : null}
         <button

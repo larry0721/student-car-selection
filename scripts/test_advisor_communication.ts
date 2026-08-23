@@ -261,7 +261,7 @@ const componentSource = readFileSync(
   join(process.cwd(), "components/BuyerProfilePlanner.tsx"),
   "utf8",
 );
-assert.ok(componentSource.includes("!hasBlockingIssue && readiness.ready ?"));
+assert.ok(componentSource.includes('validActions.includes("CONFIRM_PROFILE")'));
 assert.ok(componentSource.includes("Answer one more question"));
 assert.ok(componentSource.includes("clearCurrentSearchResult(\"I’m updating the current profile"));
 assert.ok(componentSource.includes("!outOfScopeMessage && !currentQuestion"));

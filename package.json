@@ -69,6 +69,8 @@
     "test:preference-interpretation": "tsc -p tsconfig.recommendation-tests.json && node /private/tmp/student-car-selection-recommendation-tests/scripts/test_preference_interpretation.js",
     "test:conversation-intake": "tsc -p tsconfig.recommendation-tests.json && node /private/tmp/student-car-selection-recommendation-tests/scripts/test_conversation_intake.js",
     "test:confirmation-flow": "tsc -p tsconfig.recommendation-tests.json && node /private/tmp/student-car-selection-recommendation-tests/scripts/test_confirmation_flow.js",
+    "test:clarification-continuation": "tsc -p tsconfig.recommendation-tests.json && node /private/tmp/student-car-selection-recommendation-tests/scripts/test_clarification_continuation.js",
+    "test:conversation-invariants": "tsc -p tsconfig.recommendation-tests.json && node /private/tmp/student-car-selection-recommendation-tests/scripts/test_conversation_invariants.js",
     "test:budget-state": "tsc -p tsconfig.recommendation-tests.json && node /private/tmp/student-car-selection-recommendation-tests/scripts/test_budget_state_regression.js",
     "test:confirmed-profile-integration": "tsc -p tsconfig.recommendation-tests.json && node /private/tmp/student-car-selection-recommendation-tests/scripts/test_confirmed_profile_integration.js",
     "test:fine-tune-sync": "tsc -p tsconfig.recommendation-tests.json && node /private/tmp/student-car-selection-recommendation-tests/scripts/test_fine_tune_sync.js"

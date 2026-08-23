@@ -359,6 +359,7 @@ export function carryForwardConfirmedPreferenceDraft(
 
   previousDraft.items.forEach((item) => {
     if (removedSet.has(item.id) || carriedItemIds.has(item.id)) return;
+    if (isSupersededRelationshipItem(item, nextDraft.items)) return;
     if (!nextDraft.items.some((candidate) => candidate.id === item.id || (item.field && candidate.field === item.field)) && shouldCarryForward(item)) {
       items.push(item);
     }
@@ -427,6 +428,28 @@ function nextShouldReplacePrevious(
 function sourceTurnSequence(sourceTurnId: string | undefined) {
   const sequence = sourceTurnId?.match(/^turn-(\d+)$/)?.[1];
   return sequence ? Number(sequence) : undefined;
+}
+
+function isSupersededRelationshipItem(
+  previous: ConfirmedPreferenceItem,
+  nextItems: ConfirmedPreferenceItem[],
+) {
+  if (!previous.conceptType || !previous.canonicalIntent) return false;
+  if (!["vehicle_make", "body_style", "vehicle_category", "fuel_type", "drivetrain", "transmission"].includes(previous.conceptType)) {
+    return false;
+  }
+  const previousValues = new Set(asComparableValues(previous.value));
+  return nextItems.some((next) =>
+    next.conceptType === previous.conceptType
+    && Boolean(next.canonicalIntent)
+    && next.canonicalIntent !== previous.canonicalIntent
+    && asComparableValues(next.value).some((value) => previousValues.has(value))
+    && nextShouldReplacePrevious(previous, next)
+  );
+}
+
+function asComparableValues(value: ConfirmedPreferenceItem["value"]) {
+  return (Array.isArray(value) ? value : [value]).map((item) => String(item).trim().toLowerCase());
 }
 
 function addMissingOrDefaultItems(
@@ -761,5 +784,7 @@ function editableTypeForField(field: keyof BuyerProfilePatch): ConfirmedPreferen
 
 function findSourceTurn(turns: ConversationTurn[], evidencePhrase: string) {
   if (!evidencePhrase) return undefined;
-  return turns.find((turn) => turn.role === "user" && turn.text.toLowerCase().includes(evidencePhrase.toLowerCase()));
+  return [...turns]
+    .reverse()
+    .find((turn) => turn.role === "user" && turn.text.toLowerCase().includes(evidencePhrase.toLowerCase()));
 }

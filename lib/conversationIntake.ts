@@ -36,6 +36,8 @@ export type IntakeStatus =
   | "awaiting_initial_message"
   | "awaiting_clarification"
   | "ready_for_confirmation"
+  | "explain_unsupported"
+  | "recoverable_error"
   | "confirmed";
 
 export type IntakeTurnRole = "user" | "advisor";
@@ -87,6 +89,21 @@ export type ConversationIntakeSession = {
     message: string;
   };
   baselineProfile?: BuyerProfile;
+};
+
+export type ClarificationLifecycleStatus = "asked" | "answered" | "resolved" | "unresolved" | "superseded";
+
+export type ClarificationLifecycleEntry = {
+  questionId: IntakeQuestionCode;
+  status: ClarificationLifecycleStatus;
+  attempts: number;
+  lastQuestionText: string;
+};
+
+export type ConversationContinuationPlan = {
+  question: IntakeQuestion | null;
+  outcome: "ask_clarification" | "ready_for_confirmation" | "explain_unsupported";
+  reason: string;
 };
 
 type ClarificationAnswerResult = {
@@ -368,29 +385,99 @@ export function skipConversationQuestion(session: ConversationIntakeSession): Co
 }
 
 export function requestAnotherConversationQuestion(session: ConversationIntakeSession): ConversationIntakeSession {
-  const nextQuestion =
-    selectNextQuestion(
-      session.accumulatedInterpretation,
-      session.answeredQuestionIds,
-      session.skippedQuestionIds,
-      session.unresolvedUncertainties,
-      session.unresolvedConflicts,
-      session.baselineProfile,
-    ) ||
-    fallbackQuestion(session);
+  if (session.currentQuestion) return session;
+  const plan = planConversationContinuation(session);
 
-  if (!nextQuestion) return session;
+  if (!plan.question) {
+    return {
+      ...session,
+      intakeStatus: plan.outcome === "ready_for_confirmation" ? "ready_for_confirmation" : "explain_unsupported",
+    };
+  }
 
   const nextSequence = session.conversationTurns.length + 1;
   return {
     ...session,
     conversationTurns: [
       ...session.conversationTurns,
-      createTurn(nextSequence, "advisor", nextQuestion.text, "additional_question", nextQuestion.id),
+      createTurn(nextSequence, "advisor", plan.question.text, "additional_question", plan.question.id),
     ],
-    currentQuestion: nextQuestion,
+    currentQuestion: plan.question,
     intakeStatus: "awaiting_clarification",
   };
+}
+
+export function planConversationContinuation(session: ConversationIntakeSession): ConversationContinuationPlan {
+  if (session.currentQuestion) {
+    return {
+      question: session.currentQuestion,
+      outcome: "ask_clarification",
+      reason: "An actionable clarification is already active.",
+    };
+  }
+
+  const nextQuestion = selectNextQuestion(
+    session.accumulatedInterpretation,
+    session.answeredQuestionIds,
+    session.skippedQuestionIds,
+    session.unresolvedUncertainties,
+    session.unresolvedConflicts,
+    session.baselineProfile,
+  ) || fallbackQuestion(session);
+
+  if (nextQuestion) {
+    return {
+      question: nextQuestion,
+      outcome: "ask_clarification",
+      reason: "The planner found a supported detail that can still affect the recommendation.",
+    };
+  }
+
+  const updates = session.accumulatedInterpretation.suggestedProfileUpdates;
+  const policies = mergeDecisionParticipationPolicyMaps(
+    session.baselineProfile?.decisionPolicies,
+    session.accumulatedInterpretation.decisionPolicies,
+  );
+  const enoughInformation = hasPositiveDecisionCriterion(updates) || Object.values(policies || {}).some(policyIsPositiveCriterion);
+  return enoughInformation
+    ? {
+        question: null,
+        outcome: "ready_for_confirmation",
+        reason: "No useful clarification remains and the profile has a supported decision criterion.",
+      }
+    : {
+        question: null,
+        outcome: "explain_unsupported",
+        reason: "No useful clarification remains and the understood request has no supported decision criterion.",
+      };
+}
+
+export function getClarificationLifecycle(session: ConversationIntakeSession): ClarificationLifecycleEntry[] {
+  const questionTurns = session.conversationTurns.filter(
+    (turn): turn is ConversationTurn & { questionCode: IntakeQuestionCode } => turn.role === "advisor" && Boolean(turn.questionCode),
+  );
+  const questionIds = Array.from(new Set(questionTurns.map((turn) => turn.questionCode)));
+  return questionIds.map((questionId) => {
+    const attempts = questionTurns.filter((turn) => turn.questionCode === questionId).length;
+    const lastQuestionText = [...questionTurns].reverse().find((turn) => turn.questionCode === questionId)?.text || "";
+    const isActive = session.currentQuestion?.id === questionId;
+    const wasAnswered = session.answeredQuestionIds.includes(questionId);
+    const remainsUnresolved = questionNeedsRefinement(session, questionId);
+    return {
+      questionId,
+      attempts,
+      lastQuestionText,
+      status: isActive
+        ? "asked"
+        : wasAnswered && remainsUnresolved
+          ? "unresolved"
+          : wasAnswered
+            ? "resolved"
+            : session.skippedQuestionIds.includes(questionId)
+              ? "unresolved"
+              : "superseded",
+    };
+  });
 }
 
 export function getLatestAdvisorTurn(session: ConversationIntakeSession) {
@@ -407,11 +494,13 @@ function fallbackQuestion(session: ConversationIntakeSession): IntakeQuestion | 
   if (
     !effectivePurchaseBudget
     && policyAllowsClarification(policies, "purchaseBudget")
-    && !session.answeredQuestionIds.includes("budget_max")
+    && clarificationAttemptCount(session, "budget_max") < 2
   ) {
     return {
       id: "budget_max",
-      text: "What is the maximum purchase budget you want me to work within?",
+      text: clarificationAttemptCount(session, "budget_max") > 0
+        ? "If you are unsure of an exact amount, what price range would still feel responsible—or should purchase price not limit the search?"
+        : "What is the maximum purchase budget you want me to work within?",
       reason: "Budget strongly affects responsible recommendations.",
     };
   }
@@ -430,6 +519,26 @@ function fallbackQuestion(session: ConversationIntakeSession): IntakeQuestion | 
     };
   }
   return null;
+}
+
+function clarificationAttemptCount(session: ConversationIntakeSession, questionId: IntakeQuestionCode) {
+  return session.conversationTurns.filter(
+    (turn) => turn.role === "advisor" && turn.questionCode === questionId,
+  ).length;
+}
+
+function questionNeedsRefinement(session: ConversationIntakeSession, questionId: IntakeQuestionCode) {
+  const updates = session.accumulatedInterpretation.suggestedProfileUpdates;
+  const policies = mergeDecisionParticipationPolicyMaps(
+    session.baselineProfile?.decisionPolicies,
+    session.accumulatedInterpretation.decisionPolicies,
+  );
+  if (questionId === "budget_max") {
+    return !(updates.maxPurchaseBudget ?? session.baselineProfile?.maxPurchaseBudget)
+      && policyAllowsClarification(policies, "purchaseBudget");
+  }
+  if (questionId === "daily_use") return !hasPositiveDecisionCriterion(updates);
+  return false;
 }
 
 export function getConciseUnderstanding(session: ConversationIntakeSession) {
@@ -1347,16 +1456,44 @@ function mergeCanonicalProfileUpdates(
   if (latestConcepts.has("vehicle_make")) {
     delete next.requiredMake;
     delete next.preferredMake;
+    delete next.requiredMakes;
+    delete next.preferredMakes;
     delete next.allowedMakes;
     delete next.excludedMakes;
   }
   if (latestConcepts.has("body_style") || latestConcepts.has("vehicle_category")) {
     delete next.bodyStyle;
+    delete next.requiredBodyStyles;
+    delete next.preferredBodyStyles;
+    delete next.allowedBodyStyles;
+    delete next.excludedBodyStyles;
+    delete next.requiredVehicleCategories;
+    delete next.preferredVehicleCategories;
+    delete next.allowedVehicleCategories;
+    delete next.excludedVehicleCategories;
     next.flexibleConstraints = next.flexibleConstraints?.filter((item) => item !== "bodyStyle");
   }
-  if (latestConcepts.has("fuel_type")) delete next.requiredFuelType;
-  if (latestConcepts.has("drivetrain")) delete next.drivetrainPreference;
-  if (latestConcepts.has("transmission")) delete next.transmissionPreference;
+  if (latestConcepts.has("fuel_type")) {
+    delete next.requiredFuelType;
+    delete next.requiredFuelTypes;
+    delete next.preferredFuelTypes;
+    delete next.allowedFuelTypes;
+    delete next.excludedFuelTypes;
+  }
+  if (latestConcepts.has("drivetrain")) {
+    delete next.drivetrainPreference;
+    delete next.requiredDrivetrains;
+    delete next.preferredDrivetrains;
+    delete next.allowedDrivetrains;
+    delete next.excludedDrivetrains;
+  }
+  if (latestConcepts.has("transmission")) {
+    delete next.transmissionPreference;
+    delete next.requiredTransmissions;
+    delete next.preferredTransmissions;
+    delete next.allowedTransmissions;
+    delete next.excludedTransmissions;
+  }
 
   return mergeProfileUpdates(next, buildProfilePatch(canonicalMappings) as BuyerProfilePatch);
 }
