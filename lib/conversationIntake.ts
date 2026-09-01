@@ -255,11 +255,11 @@ export function answerConversationQuestion(session: ConversationIntakeSession, a
       createTurn(nextSequence + 1, "advisor", advisorText, "clarification_merge", nextQuestion?.id),
     ],
     accumulatedInterpretation: mergedInterpretation,
-    confirmedProfileUpdates: {
-      ...session.confirmedProfileUpdates,
-      ...getConfirmedProfileUpdates(mergedInterpretation),
-      ...getConfirmedProfileUpdatesFromResult(result),
-    },
+    confirmedProfileUpdates: mergeConfirmedProfileUpdates(
+      session.confirmedProfileUpdates,
+      mergedInterpretation,
+      result,
+    ),
     pendingProfileUpdates: mergedInterpretation.suggestedProfileUpdates,
     currentQuestion: nextQuestion,
     answeredQuestionIds,
@@ -337,11 +337,11 @@ export async function answerConversationQuestionWithSemantic(
       createTurn(nextSequence + 1, "advisor", advisorText, "clarification_merge", nextQuestion?.id),
     ],
     accumulatedInterpretation: mergedInterpretation,
-    confirmedProfileUpdates: {
-      ...session.confirmedProfileUpdates,
-      ...getConfirmedProfileUpdates(mergedInterpretation),
-      ...getConfirmedProfileUpdatesFromResult(result),
-    },
+    confirmedProfileUpdates: mergeConfirmedProfileUpdates(
+      session.confirmedProfileUpdates,
+      mergedInterpretation,
+      result,
+    ),
     pendingProfileUpdates: mergedInterpretation.suggestedProfileUpdates,
     currentQuestion: nextQuestion,
     answeredQuestionIds,
@@ -1247,9 +1247,42 @@ function mergePreferenceInterpretation(
     result.canonicalMappings,
     result.profileUpdates.decisionPolicies,
   );
-  const explicitFacts = mergeFacts(interpretation.explicitFacts, result.explicitFacts);
-  const inferredPreferences = mergeInferredPreferences(interpretation.inferredPreferences, result.inferredPreferences, result.explicitFacts);
-  const confidenceByField = mergeConfidence(interpretation.confidenceByField, result.confidenceByField);
+  const activeMappingIds = new Set(canonicalMappings.map((item) => item.id));
+  const activeRelationshipFields = new Set<keyof BuyerProfilePatch>(
+    canonicalMappings.flatMap((item) => item.destination ? [item.destination] : []),
+  );
+  const revisedRelationshipConcepts = new Set(
+    (result.canonicalMappings || [])
+      .map((item) => item.conceptType)
+      .filter((concept) => isRelationshipConcept(concept)),
+  );
+  const explicitFacts = mergeFacts(interpretation.explicitFacts, result.explicitFacts)
+    .filter((item) => relationshipEvidenceRemainsActive(
+      item.field,
+      item.mappingId,
+      revisedRelationshipConcepts,
+      activeMappingIds,
+      activeRelationshipFields,
+    ));
+  const inferredPreferences = mergeInferredPreferences(
+    interpretation.inferredPreferences,
+    result.inferredPreferences,
+    result.explicitFacts,
+  ).filter((item) => relationshipEvidenceRemainsActive(
+    item.field,
+    item.mappingId,
+    revisedRelationshipConcepts,
+    activeMappingIds,
+    activeRelationshipFields,
+  ));
+  const confidenceByField = mergeConfidence(interpretation.confidenceByField, result.confidenceByField)
+    .filter((item) => relationshipEvidenceRemainsActive(
+      item.field,
+      item.mappingId,
+      revisedRelationshipConcepts,
+      activeMappingIds,
+      activeRelationshipFields,
+    ));
   const conflicts = mergeConflicts(interpretation.conflicts, result.resolvedConflictTopics, result.newConflicts);
   const uncertainties = mergeUncertainties(interpretation.uncertainties, result.resolvedUncertaintyTopics, result.newUncertainties);
 
@@ -1496,6 +1529,28 @@ function mergeCanonicalProfileUpdates(
 ) {
   const next: BuyerProfilePatch = { ...current };
   const latestConcepts = new Set(latestMappings.map((item) => item.conceptType));
+  clearRelationshipProfileFields(next, latestConcepts);
+
+  const affectedPolicyDimensions = new Set<DecisionPolicyDimension>();
+  for (const concept of latestConcepts) {
+    const dimension = decisionPolicyDimensionForSemanticConcept(concept);
+    if (dimension) affectedPolicyDimensions.add(dimension);
+  }
+  if (next.decisionPolicies && affectedPolicyDimensions.size) {
+    next.decisionPolicies = { ...next.decisionPolicies };
+    for (const dimension of affectedPolicyDimensions) {
+      if (!latestPolicies?.[dimension]) delete next.decisionPolicies[dimension];
+    }
+    if (!Object.keys(next.decisionPolicies).length) delete next.decisionPolicies;
+  }
+
+  return mergeProfileUpdates(next, buildProfilePatch(canonicalMappings) as BuyerProfilePatch);
+}
+
+function clearRelationshipProfileFields(
+  next: BuyerProfilePatch,
+  latestConcepts: Set<CanonicalMappedConcept["conceptType"]>,
+) {
   if (latestConcepts.has("vehicle_make")) {
     delete next.requiredMake;
     delete next.preferredMake;
@@ -1537,21 +1592,6 @@ function mergeCanonicalProfileUpdates(
     delete next.allowedTransmissions;
     delete next.excludedTransmissions;
   }
-
-  const affectedPolicyDimensions = new Set<DecisionPolicyDimension>();
-  for (const concept of latestConcepts) {
-    const dimension = decisionPolicyDimensionForSemanticConcept(concept);
-    if (dimension) affectedPolicyDimensions.add(dimension);
-  }
-  if (next.decisionPolicies && affectedPolicyDimensions.size) {
-    next.decisionPolicies = { ...next.decisionPolicies };
-    for (const dimension of affectedPolicyDimensions) {
-      if (!latestPolicies?.[dimension]) delete next.decisionPolicies[dimension];
-    }
-    if (!Object.keys(next.decisionPolicies).length) delete next.decisionPolicies;
-  }
-
-  return mergeProfileUpdates(next, buildProfilePatch(canonicalMappings) as BuyerProfilePatch);
 }
 
 function decisionPolicyDimensionForSemanticConcept(
@@ -1621,7 +1661,7 @@ function getConfirmedProfileUpdates(interpretation: PreferenceInterpretation) {
   const confirmed: BuyerProfilePatch = {};
   interpretation.confidenceByField.forEach((entry) => {
     if (entry.confidence === "high" && !entry.requiresConfirmation) {
-      (confirmed as Record<string, unknown>)[entry.field] = entry.value;
+      (confirmed as Record<string, unknown>)[entry.field] = normalizeConfirmedFieldValue(entry.field, entry.value);
     }
   });
   return confirmed;
@@ -1631,10 +1671,94 @@ function getConfirmedProfileUpdatesFromResult(result: ClarificationAnswerResult)
   const confirmed: BuyerProfilePatch = {};
   result.confidenceByField.forEach((entry) => {
     if (entry.confidence === "high" && !entry.requiresConfirmation) {
-      (confirmed as Record<string, unknown>)[entry.field] = entry.value;
+      (confirmed as Record<string, unknown>)[entry.field] = normalizeConfirmedFieldValue(entry.field, entry.value);
     }
   });
   return confirmed;
+}
+
+function normalizeConfirmedFieldValue(
+  field: keyof BuyerProfilePatch,
+  value: string | number | boolean | string[],
+) {
+  const multiValueFields: Array<keyof BuyerProfilePatch> = [
+    "requiredMakes", "preferredMakes", "allowedMakes", "excludedMakes",
+    "requiredBodyStyles", "preferredBodyStyles", "allowedBodyStyles", "excludedBodyStyles",
+    "requiredVehicleCategories", "preferredVehicleCategories", "allowedVehicleCategories", "excludedVehicleCategories",
+    "requiredFuelTypes", "preferredFuelTypes", "allowedFuelTypes", "excludedFuelTypes",
+    "requiredDrivetrains", "preferredDrivetrains", "allowedDrivetrains", "excludedDrivetrains",
+    "requiredTransmissions", "preferredTransmissions", "allowedTransmissions", "excludedTransmissions",
+  ];
+  if (!multiValueFields.includes(field)) return value;
+  return Array.isArray(value) ? value.map(String) : [String(value)];
+}
+
+function isRelationshipProfileField(field: keyof BuyerProfilePatch) {
+  return [
+    "requiredMake", "preferredMake", "requiredMakes", "preferredMakes", "allowedMakes", "excludedMakes",
+    "bodyStyle", "requiredBodyStyles", "preferredBodyStyles", "allowedBodyStyles", "excludedBodyStyles",
+    "requiredVehicleCategories", "preferredVehicleCategories", "allowedVehicleCategories", "excludedVehicleCategories",
+    "requiredFuelType", "requiredFuelTypes", "preferredFuelTypes", "allowedFuelTypes", "excludedFuelTypes",
+    "drivetrainPreference", "requiredDrivetrains", "preferredDrivetrains", "allowedDrivetrains", "excludedDrivetrains",
+    "transmissionPreference", "requiredTransmissions", "preferredTransmissions", "allowedTransmissions", "excludedTransmissions",
+  ].includes(field);
+}
+
+function isRelationshipConcept(concept: CanonicalMappedConcept["conceptType"]) {
+  return ["vehicle_make", "body_style", "vehicle_category", "fuel_type", "drivetrain", "transmission"].includes(concept);
+}
+
+function relationshipConceptForProfileField(
+  field: keyof BuyerProfilePatch,
+): CanonicalMappedConcept["conceptType"] | undefined {
+  if (["requiredMake", "preferredMake", "requiredMakes", "preferredMakes", "allowedMakes", "excludedMakes"].includes(field)) {
+    return "vehicle_make";
+  }
+  if (["bodyStyle", "requiredBodyStyles", "preferredBodyStyles", "allowedBodyStyles", "excludedBodyStyles"].includes(field)) {
+    return "body_style";
+  }
+  if (["requiredVehicleCategories", "preferredVehicleCategories", "allowedVehicleCategories", "excludedVehicleCategories"].includes(field)) {
+    return "vehicle_category";
+  }
+  if (["requiredFuelType", "requiredFuelTypes", "preferredFuelTypes", "allowedFuelTypes", "excludedFuelTypes"].includes(field)) {
+    return "fuel_type";
+  }
+  if (["drivetrainPreference", "requiredDrivetrains", "preferredDrivetrains", "allowedDrivetrains", "excludedDrivetrains"].includes(field)) {
+    return "drivetrain";
+  }
+  if (["transmissionPreference", "requiredTransmissions", "preferredTransmissions", "allowedTransmissions", "excludedTransmissions"].includes(field)) {
+    return "transmission";
+  }
+  return undefined;
+}
+
+function relationshipEvidenceRemainsActive(
+  field: keyof BuyerProfilePatch | undefined,
+  mappingId: string | undefined,
+  revisedConcepts: Set<CanonicalMappedConcept["conceptType"]>,
+  activeMappingIds: Set<string>,
+  activeFields: Set<keyof BuyerProfilePatch>,
+) {
+  if (!field || !isRelationshipProfileField(field)) return true;
+  const concept = relationshipConceptForProfileField(field);
+  if (!concept || !revisedConcepts.has(concept)) return true;
+  return (!mappingId || activeMappingIds.has(mappingId)) && activeFields.has(field);
+}
+
+function mergeConfirmedProfileUpdates(
+  current: BuyerProfilePatch,
+  interpretation: PreferenceInterpretation,
+  result: ClarificationAnswerResult,
+) {
+  const next: BuyerProfilePatch = { ...current };
+  clearRelationshipProfileFields(
+    next,
+    new Set((result.canonicalMappings || []).map((item) => item.conceptType)),
+  );
+  return mergeProfileUpdates(
+    mergeProfileUpdates(next, getConfirmedProfileUpdates(interpretation)),
+    getConfirmedProfileUpdatesFromResult(result),
+  );
 }
 
 function calculateInterpretationConfidence(

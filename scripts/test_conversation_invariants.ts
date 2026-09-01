@@ -193,6 +193,8 @@ async function run() {
   check("confirmed revision supersedes stale relationship item", () => {
     assert.deepEqual(allowedSuvDraft.confirmedUpdates.allowedBodyStyles, ["suv"]);
     assert.equal(allowedSuvDraft.confirmedUpdates.excludedBodyStyles, undefined);
+    assert.deepEqual(allowedSuvSession.confirmedProfileUpdates.allowedBodyStyles, ["suv"]);
+    assert.equal(allowedSuvSession.confirmedProfileUpdates.excludedBodyStyles, undefined);
   });
   const excludedSuvConversion = convertConfirmedPreferencesToBuyerProfile(
     defaults,
