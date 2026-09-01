@@ -686,7 +686,7 @@ function labelForField(field: keyof BuyerProfilePatch) {
     requiredMake: "Required make",
     preferredMake: "Preferred make",
     allowedMakes: "Allowed makes",
-    excludedMakes: "Excluded make",
+    excludedMakes: "Excluded makes",
     requiredMakes: "Required make",
     preferredMakes: "Preferred make",
     requiredBodyStyles: "Required body style",

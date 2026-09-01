@@ -1,7 +1,14 @@
 import type { BuyerProfile } from "@/types/buyer";
 import type { ConfirmedPreferenceItem, ConfirmedPreferenceProfile, ConstraintStrength } from "./confirmedPreferenceProfile";
 import type { BuyerProfilePatch } from "./preferenceInterpretation";
-import { applyDimensionIntent, dimensionIntentForField, normalizeProfileDimensions } from "./profileDimensions";
+import {
+  applyDimensionIntent,
+  applyDimensionState,
+  dimensionIntentForField,
+  getProfileDimensionState,
+  normalizeProfileDimensions,
+  type ProfileDimension,
+} from "./profileDimensions";
 import {
   isDecisionDimensionDisabled,
   mergeDecisionParticipationPolicyMaps,
@@ -184,6 +191,20 @@ export function convertConfirmedPreferencesToBuyerProfile(
     };
   }
 
+
+  const confirmedItems = approvedProfile.items.filter(
+    (item) =>
+      item.certainty === "confirmed"
+      || isApprovedPolicyTarget(item, approvedProfile),
+  );
+  const assumedDefaultItems = approvedProfile.items.filter((item) => item.certainty === "assumed_default");
+  const preservedSemanticItems = approvedProfile.items.filter(
+    (item) =>
+      !approvedProfile.removedItemIds.includes(item.id)
+      && item.recommendationSupport === "understood_not_ranked"
+      && (item.certainty === "confirmed" || item.certainty === "inferred"),
+  );
+
   buyerProfile.decisionPolicies = mergeDecisionParticipationPolicyMaps(
     buyerProfile.decisionPolicies,
     approvedProfile.decisionPolicies,
@@ -198,20 +219,8 @@ export function convertConfirmedPreferencesToBuyerProfile(
       buyerProfile.decisionPolicies[dimension as keyof typeof buyerProfile.decisionPolicies] = policy;
     }
   }
+  prepareRelationshipRevisionState(buyerProfile, confirmedItems, approvedProfile);
   appliedUpdates.decisionPolicies = buyerProfile.decisionPolicies;
-
-  const confirmedItems = approvedProfile.items.filter(
-    (item) =>
-      item.certainty === "confirmed"
-      || isApprovedPolicyTarget(item, approvedProfile),
-  );
-  const assumedDefaultItems = approvedProfile.items.filter((item) => item.certainty === "assumed_default");
-  const preservedSemanticItems = approvedProfile.items.filter(
-    (item) =>
-      !approvedProfile.removedItemIds.includes(item.id) &&
-      item.recommendationSupport === "understood_not_ranked" &&
-      (item.certainty === "confirmed" || item.certainty === "inferred"),
-  );
 
   preservedSemanticPreferences.push(...preservedSemanticItems.map((item) => toEntry(item, undefined)));
 
@@ -317,6 +326,49 @@ export function convertConfirmedPreferencesToBuyerProfile(
     conversionWarnings,
     mappingLimitations,
   };
+}
+
+function prepareRelationshipRevisionState(
+  buyerProfile: BuyerProfile,
+  confirmedItems: ConfirmedPreferenceItem[],
+  approvedProfile: ConfirmedPreferenceProfile,
+) {
+  const itemsByDimension = new Map<ProfileDimension, ConfirmedPreferenceItem[]>();
+  for (const item of confirmedItems) {
+    if (!item.field || approvedProfile.removedItemIds.includes(item.id)) continue;
+    const relationship = dimensionIntentForField(item.field as keyof BuyerProfile);
+    if (!relationship) continue;
+    const current = itemsByDimension.get(relationship.dimension) || [];
+    current.push(item);
+    itemsByDimension.set(relationship.dimension, current);
+  }
+
+  for (const [dimension, items] of itemsByDimension) {
+    const replacesPositiveState = items.some(
+      (item) => item.canonicalIntent === "required" || item.canonicalIntent === "preferred",
+    );
+    if (replacesPositiveState) {
+      const state = getProfileDimensionState(buyerProfile, dimension);
+      Object.assign(buyerProfile, applyDimensionState(buyerProfile, dimension, {
+        required: [],
+        preferred: [],
+        allowed: [],
+        excluded: state.excluded,
+      }));
+    }
+
+    const policyDimension = policyDimensionForProfileDimension(dimension);
+    if (!approvedProfile.decisionPolicies[policyDimension]) {
+      delete buyerProfile.decisionPolicies?.[policyDimension];
+    }
+  }
+}
+
+function policyDimensionForProfileDimension(
+  dimension: ProfileDimension,
+): "make" | "bodyStyle" | "fuelType" | "drivetrain" | "transmission" {
+  if (dimension === "vehicleCategory") return "bodyStyle";
+  return dimension;
 }
 
 function isApprovedPolicyTarget(

@@ -9,7 +9,6 @@ import {
 import {
   createEmptyUnderstandingDraft,
   DeterministicSemanticUnderstandingProvider,
-  understandDeterministically,
   type ClarificationCandidate,
   type ProposedConstraintStrength,
   type RecognizedSemanticEntity,
@@ -195,10 +194,9 @@ export class ModelBackedSemanticUnderstandingProvider implements SemanticUnderst
 
     try {
       const response = await this.callModelWithRetries(context);
-      const draft = supplementExplicitObjectiveValues(
-        parseUnderstandingDraftFromModelResponse(response.text),
-        request,
-      );
+      // A valid model draft owns the language interpretation. The next stage
+      // validates and normalizes it; it must not replace it with regex output.
+      const draft = parseUnderstandingDraftFromModelResponse(response.text);
       const diagnostics = countDraftDiagnostics(baseDiagnostics(true, "passed"), draft);
       return {
         providerId: this.providerId,
@@ -409,119 +407,6 @@ export function buildSemanticProviderInstructions() {
     "Intent is the user's relationship to the concept. proposedConstraintStrength is constraint force; requiresConfirmation is confirmation state.",
     "If meaning is ambiguous or unsupported, keep it uncertain or unresolved and ask one focused clarification candidate.",
   ].join("\n");
-}
-
-function supplementExplicitObjectiveValues(
-  modelDraft: UnderstandingDraft,
-  request: SemanticUnderstandingRequest,
-): UnderstandingDraft {
-  const deterministicDraft = understandDeterministically(request).draft;
-  const supportedObjectiveConcepts = new Set<SemanticConcept>([
-    "body_style",
-    "powertrain",
-    "drivetrain",
-    "transmission",
-  ]);
-  const modelItemsByKey = new Map<string, UnderstandingInterpretation[]>();
-  for (const item of collectDraftInterpretations(modelDraft)) {
-    const key = interpretationIdentity(item);
-    modelItemsByKey.set(key, [...(modelItemsByKey.get(key) || []), item]);
-  }
-  const missing = collectDraftInterpretations(deterministicDraft).filter((item) => {
-    const key = interpretationIdentity(item);
-    const modelItems = modelItemsByKey.get(key) || [];
-    return supportedObjectiveConcepts.has(item.concept)
-      && item.status === "explicit"
-      && item.intent !== "uncertain"
-      && (
-        !modelItems.length
-        || modelItems.every(
-          (modelItem) => canonicalIntentStrength(modelItem.intent) < canonicalIntentStrength(item.intent),
-        )
-      );
-  });
-  const deterministicPolicyDimensions = new Set(
-    deterministicDraft.decisionPolicyInstructions.map((item) => item.dimension),
-  );
-  const supplementalPolicyInstructions = deterministicDraft.decisionPolicyInstructions;
-  if (!missing.length && !supplementalPolicyInstructions.length) return modelDraft;
-
-  const replacementKeys = new Set(missing.map(interpretationIdentity));
-  const draftWithoutWeakerDuplicates = removeInterpretationsByIdentity(
-    modelDraft,
-    replacementKeys,
-  );
-
-  return {
-    ...draftWithoutWeakerDuplicates,
-    decisionPolicyInstructions: [
-      ...draftWithoutWeakerDuplicates.decisionPolicyInstructions.filter(
-        (item) => !deterministicPolicyDimensions.has(item.dimension),
-      ),
-      ...supplementalPolicyInstructions.map((item) => ({
-        ...item,
-        id: `deterministic-policy:${item.id}`,
-      })),
-    ],
-    explicitPreferences: [
-      ...draftWithoutWeakerDuplicates.explicitPreferences,
-      ...missing.map((item) => ({
-        ...item,
-        id: `deterministic-objective:${item.id}`,
-        interpretationSource: "deterministic_recognition" as const,
-      })),
-    ],
-  };
-}
-
-function interpretationIdentity(item: UnderstandingInterpretation) {
-  return `${item.concept}:${String(item.proposedValue).toLowerCase()}`;
-}
-
-function canonicalIntentStrength(intent: CanonicalSemanticIntent) {
-  const strength: Record<CanonicalSemanticIntent, number> = {
-    uncertain: 0,
-    preferred: 1,
-    allowed: 2,
-    required: 3,
-    excluded: 3,
-  };
-  return strength[intent];
-}
-
-function removeInterpretationsByIdentity(
-  draft: UnderstandingDraft,
-  identities: Set<string>,
-): UnderstandingDraft {
-  if (!identities.size) return draft;
-  const keep = <Item extends UnderstandingInterpretation>(item: Item) =>
-    !identities.has(interpretationIdentity(item));
-  return {
-    ...draft,
-    explicitPreferences: draft.explicitPreferences.filter(keep),
-    inferredPreferences: draft.inferredPreferences.filter(keep),
-    recognizedEntities: draft.recognizedEntities.filter(keep),
-    referenceEntities: draft.referenceEntities.filter(keep),
-    emotionalGoals: draft.emotionalGoals.filter(keep),
-    practicalGoals: draft.practicalGoals.filter(keep),
-    aversions: draft.aversions.filter(keep),
-    constraints: draft.constraints.filter(keep),
-    unresolvedConcepts: draft.unresolvedConcepts.filter(keep),
-  };
-}
-
-function collectDraftInterpretations(draft: UnderstandingDraft) {
-  return [
-    ...draft.explicitPreferences,
-    ...draft.inferredPreferences,
-    ...draft.recognizedEntities,
-    ...draft.referenceEntities,
-    ...draft.emotionalGoals,
-    ...draft.practicalGoals,
-    ...draft.aversions,
-    ...draft.constraints,
-    ...draft.unresolvedConcepts,
-  ];
 }
 
 export function parseUnderstandingDraftFromModelResponse(text: string): UnderstandingDraft {

@@ -41,6 +41,7 @@ export type PreferenceConflict = {
   topic: string;
   description: string;
   evidencePhrases: string[];
+  conflictType?: "correction" | "refinement" | "changed_mind" | "contradiction" | "hypothetical";
 };
 
 export type PreferenceFieldConfidence = {

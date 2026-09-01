@@ -16,6 +16,7 @@ import type {
 } from "./semanticUnderstanding";
 import { resolveDecisionParticipationPolicies } from "./decisionParticipationPolicy";
 import type { DecisionParticipationPolicyMap } from "@/types/decisionPolicy";
+import { resolveScopedRelationshipIntent } from "./semanticPolarity";
 
 export type SemanticConfirmationStatus = "confirmed" | "unconfirmed";
 export type SemanticMappingSource =
@@ -104,7 +105,29 @@ export function mergeCanonicalConcepts(
   current: CanonicalMappedConcept[] = [],
   updates: CanonicalMappedConcept[] = [],
 ): CanonicalMappedConcept[] {
-  return resolveCanonicalConcepts([...current, ...updates]);
+  const resolvedUpdates = resolveCanonicalConcepts(updates);
+  const positiveReplacementTypes = new Set(
+    resolvedUpdates
+      .filter((item) => relationshipConcepts.has(item.conceptType) && (item.intent === "required" || item.intent === "preferred"))
+      .map((item) => item.conceptType),
+  );
+  const next = resolveCanonicalConcepts(current).filter((item) =>
+    !(
+      positiveReplacementTypes.has(item.conceptType)
+      && (item.intent === "required" || item.intent === "preferred" || item.intent === "allowed")
+    )
+  );
+  const updateKeys = new Set(
+    resolvedUpdates.map((item) => `${item.conceptType}:${canonicalValueKey(item.value)}`),
+  );
+
+  // The caller supplies `updates` from the latest turn. That ordering is more
+  // authoritative than provider-authored message references such as
+  // "current-message", which are not guaranteed to be monotonic.
+  return [
+    ...next.filter((item) => !updateKeys.has(`${item.conceptType}:${canonicalValueKey(item.value)}`)),
+    ...resolvedUpdates,
+  ];
 }
 
 export function buildProfilePatch(
@@ -288,7 +311,6 @@ function keepEvidenceSupportedObjectiveValues(items: CanonicalMappedConcept[]) {
 
 function objectiveValueAppearsInEvidence(item: CanonicalMappedConcept) {
   const evidence = item.sourceText;
-  const value = String(item.value).toLowerCase();
   const patterns: Partial<Record<CanonicalMappedConcept["conceptType"], Record<string, RegExp>>> = {
     body_style: bodyStyleEvidencePatterns,
     vehicle_category: bodyStyleEvidencePatterns,
@@ -310,7 +332,10 @@ function objectiveValueAppearsInEvidence(item: CanonicalMappedConcept) {
       cvt: /\bcvt\b/i,
     },
   };
-  return patterns[item.conceptType]?.[value]?.test(evidence) ?? false;
+  const values = asStringArray(item.value).map((value) => value.toLowerCase());
+  return values.length > 0 && values.every(
+    (value) => patterns[item.conceptType]?.[value]?.test(evidence) ?? false,
+  );
 }
 
 const bodyStyleEvidencePatterns: Record<string, RegExp> = {
@@ -330,33 +355,31 @@ function normalizeRelationshipSets(
 ) {
   const latestMessage = conversationSummary.split(/\s+\/\s+/).at(-1) || conversationSummary;
   let normalized = items.map((item) => {
-    if (!relationshipConcepts.has(item.conceptType)) return item;
+    if (!relationshipConcepts.has(item.conceptType) || !isDeterministicRelationshipRecovery(item)) return item;
     const value = String(item.value);
-    if (
-      item.conceptType === "vehicle_make"
-      && item.intent === "uncertain"
-      && !normalizeVehicleMake(value)
-    ) {
+    if (item.conceptType === "vehicle_make" && !normalizeVehicleMake(value)) {
       return item;
     }
-    const clause = latestMessage
-      .split(/\s*(?:,|;|\bbut\b|\band\b)\s*/i)
-      .find((part) => part.toLowerCase().includes(value.toLowerCase())) || latestMessage;
-    const bare = clause.trim().replace(/[.!?]/g, "").toLowerCase() === value.toLowerCase();
-    const explicitIntent = relationshipIntent(clause);
+    const evidence = relationshipEvidence(latestMessage, item);
+    const bare = latestMessage.trim().replace(/[.!?]/g, "").toLowerCase() === evidence.toLowerCase();
+    const explicitIntent = resolveScopedRelationshipIntent(latestMessage, {
+      canonicalValue: value,
+      evidence,
+    });
     if (explicitIntent) return withCanonicalIntent(item, explicitIntent);
-    if (/\b(?:only|must|required|need|want|looking for|find|show me)\b/i.test(clause)) {
-      return withCanonicalIntent(item, "required");
-    }
     if (bare) return withCanonicalIntent(item, "uncertain");
     return item;
   });
   if (
     /\b(?:or|either)\b/i.test(latestMessage)
+    && !normalized.some((item) => relationshipConcepts.has(item.conceptType) && item.intent === "excluded")
+    && !/\b(?:no|not|neither|except|exclude|avoid|stay away from|deal[-\s]?breaker|don['’]?t want|do not want|anything (?:but|except))\b/i.test(latestMessage)
     && !/\b(?:prefer|preferred|acceptable|okay|ok|fine|allowed|only|must|required|need|want)\b/i.test(latestMessage)
   ) {
     for (const conceptType of relationshipConcepts) {
-      const related = normalized.filter((item) => item.conceptType === conceptType);
+      const related = normalized.filter(
+        (item) => item.conceptType === conceptType && isDeterministicRelationshipRecovery(item),
+      );
       if (related.length < 2) continue;
       const relatedIds = new Set(related.map((item) => item.id));
       const intent = conceptType === "vehicle_make" ? "allowed" : "uncertain";
@@ -367,17 +390,20 @@ function normalizeRelationshipSets(
   }
   if (/\b(?:acceptable|okay|ok|fine|allowed|fallback|if necessary)\b/i.test(latestMessage)) {
     for (const conceptType of relationshipConcepts) {
-      const related = normalized.filter((item) => item.conceptType === conceptType);
+      const related = normalized.filter(
+        (item) => item.conceptType === conceptType && isDeterministicRelationshipRecovery(item),
+      );
       if (!related.some((item) => item.intent === "allowed")) continue;
       const requiredIds = new Set(
         related
           .filter((item) => {
             if (item.intent !== "required") return false;
             const value = String(item.value);
-            const clause = latestMessage
-              .split(/\s*(?:,|;|\bbut\b|\band\b)\s*/i)
-              .find((part) => part.toLowerCase().includes(value.toLowerCase())) || latestMessage;
-            return !/\b(?:required|must|need|only|non[-\s]?negotiable)\b/i.test(clause);
+            const evidence = relationshipEvidence(latestMessage, item);
+            const intent = resolveScopedRelationshipIntent(latestMessage, { canonicalValue: value, evidence });
+            // An explicitly allowed fallback makes the primary fallback value
+            // flexible, even though it remains the user's first choice.
+            return intent !== "required" || related.some((candidate) => candidate.intent === "allowed");
           })
           .map((item) => item.id),
       );
@@ -393,6 +419,50 @@ function normalizeRelationshipSets(
   return normalized;
 }
 
+// Relationship recovery is only for deterministic fallback output. A
+// successful model already returned the user's intent and must not be recast
+// by keyword or coordination heuristics during mapping.
+function isDeterministicRelationshipRecovery(item: CanonicalMappedConcept) {
+  return item.source === "deterministic_fallback"
+    || item.source === "user_explicit";
+}
+
+function relationshipEvidence(message: string, item: CanonicalMappedConcept) {
+  if (item.conceptType === "vehicle_make") {
+    return recognizeMakesInText(message)
+      .find((make) => make.canonicalName.toLowerCase() === String(item.value).toLowerCase())
+      ?.rawText || item.sourceText;
+  }
+  const pattern = objectiveEvidencePattern(item);
+  return pattern ? message.match(pattern)?.[0] || item.sourceText : item.sourceText;
+}
+
+function objectiveEvidencePattern(item: CanonicalMappedConcept) {
+  const value = String(item.value).toLowerCase();
+  const patterns: Partial<Record<CanonicalMappedConcept["conceptType"], Record<string, RegExp>>> = {
+    body_style: bodyStyleEvidencePatterns,
+    vehicle_category: bodyStyleEvidencePatterns,
+    fuel_type: {
+      gas: /\b(?:gas|gasoline)\b/i,
+      hybrid: /\bhybrid\b/i,
+      electric: /\b(?:electric|ev)\b/i,
+      diesel: /\bdiesel\b/i,
+    },
+    drivetrain: {
+      awd: /\b(?:awd|all[-\s]?wheel(?: drive)?)\b/i,
+      "4wd": /\b(?:4wd|four[-\s]?wheel(?: drive)?)\b/i,
+      fwd: /\b(?:fwd|front[-\s]?wheel(?: drive)?)\b/i,
+      rwd: /\b(?:rwd|rear[-\s]?wheel(?: drive)?)\b/i,
+    },
+    transmission: {
+      automatic: /\bautomatic(?: transmission)?\b/i,
+      manual: /\b(?:manual(?: transmission)?|stick(?: shift)?)\b/i,
+      cvt: /\bcvt\b/i,
+    },
+  };
+  return patterns[item.conceptType]?.[value];
+}
+
 const relationshipConcepts = new Set<VehicleDomainConcept>([
   "vehicle_make",
   "body_style",
@@ -401,16 +471,6 @@ const relationshipConcepts = new Set<VehicleDomainConcept>([
   "drivetrain",
   "transmission",
 ]);
-
-function relationshipIntent(clause: string): CanonicalSemanticIntent | undefined {
-  if (/\b(?:not|required|mandatory)\b/i.test(clause) && /\bnot\s+(?:required|mandatory)\b/i.test(clause)) {
-    return "uncertain";
-  }
-  if (/\b(?:no|not|except|exclude|avoid|don't want|do not want)\b/i.test(clause)) return "excluded";
-  if (/\b(?:acceptable|okay|ok|fine|allowed)\b/i.test(clause)) return "allowed";
-  if (/\b(?:prefer|preferred|maybe)\b/i.test(clause)) return "preferred";
-  return undefined;
-}
 
 function applyMakeState(
   patch: Partial<Omit<BuyerProfile, "scoreWeights">>,
@@ -641,11 +701,20 @@ function normalizeConceptValue(concept: VehicleDomainConcept, value: CanonicalMa
     if (Array.isArray(value)) return value.map((item) => normalizeVehicleMake(item) || item);
     return normalizeVehicleMake(String(value)) || value;
   }
-  if (concept === "body_style" || concept === "vehicle_category") return normalizeBodyStyle(value) || value;
-  if (concept === "fuel_type") return normalizeFuelType(value) || value;
-  if (concept === "drivetrain") return normalizeDrivetrain(value) || value;
-  if (concept === "transmission") return normalizeTransmission(value) || value;
+  if (concept === "body_style" || concept === "vehicle_category") return normalizeRelationshipValue(value, normalizeBodyStyle);
+  if (concept === "fuel_type") return normalizeRelationshipValue(value, normalizeFuelType);
+  if (concept === "drivetrain") return normalizeRelationshipValue(value, normalizeDrivetrain);
+  if (concept === "transmission") return normalizeRelationshipValue(value, normalizeTransmission);
   return value;
+}
+
+function normalizeRelationshipValue(
+  value: CanonicalMappedConcept["value"],
+  normalizer: (item: CanonicalMappedConcept["value"]) => string | undefined,
+) {
+  if (!Array.isArray(value)) return normalizer(value) || value;
+  const normalized = Array.from(new Set(value.map((item) => normalizer(item)).filter(Boolean))) as string[];
+  return normalized.length ? normalized : value;
 }
 
 function normalizeBodyStyle(value: CanonicalMappedConcept["value"]) {

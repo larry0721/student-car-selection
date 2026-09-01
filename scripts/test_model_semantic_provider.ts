@@ -99,36 +99,28 @@ async function main() {
     maxRetries: 0,
     client: new FixtureModelClient(() => draftHybridOnly()),
   });
-  const supplemented = await incompleteMultiValueProvider.understand({
+  const modelOwnedHybrid = await incompleteMultiValueProvider.understand({
     currentMessage: "Hybrid or electric is okay",
   });
-  assert.equal(supplemented.failure, undefined);
-  assert.ok(supplemented.draft.explicitPreferences.some((item) =>
-    item.concept === "powertrain"
-      && item.proposedValue === "electric"
-      && item.intent === "allowed"
-      && item.interpretationSource === "deterministic_recognition",
-  ));
+  assert.equal(modelOwnedHybrid.failure, undefined);
+  assert.equal(modelOwnedHybrid.draft.explicitPreferences.filter((item) => item.concept === "powertrain").length, 1);
+  assert.equal(modelOwnedHybrid.draft.explicitPreferences.some((item) => item.proposedValue === "electric"), false);
 
   const weakTruckProvider = new ModelBackedSemanticUnderstandingProvider({
     apiKey: "test-key",
     maxRetries: 0,
     client: new FixtureModelClient(() => draftTruckPreferred()),
   });
-  const strengthenedTruck = await weakTruckProvider.understand({
+  const modelOwnedTruck = await weakTruckProvider.understand({
     currentMessage: "Ignore budget; I want a reliable truck.",
   });
-  assert.equal(strengthenedTruck.failure, undefined);
-  assert.ok(strengthenedTruck.draft.explicitPreferences.some((item) =>
+  assert.equal(modelOwnedTruck.failure, undefined);
+  assert.ok(modelOwnedTruck.draft.inferredPreferences.some((item) =>
     item.concept === "body_style"
       && item.proposedValue === "truck"
-      && item.intent === "required"
-      && item.interpretationSource === "deterministic_recognition",
+      && item.intent === "preferred",
   ));
-  assert.ok(strengthenedTruck.draft.decisionPolicyInstructions.some((item) =>
-    item.dimension === "reliability"
-      && item.participation === "active",
-  ));
+  assert.equal(modelOwnedTruck.draft.decisionPolicyInstructions.some((item) => item.dimension === "reliability"), false);
 
   const responseBody = buildOpenAiSemanticResponseBody({
     model: "test-semantic-model",

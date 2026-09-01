@@ -194,6 +194,18 @@ async function run() {
     assert.deepEqual(allowedSuvDraft.confirmedUpdates.allowedBodyStyles, ["suv"]);
     assert.equal(allowedSuvDraft.confirmedUpdates.excludedBodyStyles, undefined);
   });
+  const excludedSuvConversion = convertConfirmedPreferencesToBuyerProfile(
+    defaults,
+    approveConfirmedPreferenceProfile(excludedSuvDraft, 50),
+  );
+  const allowedSuvConversion = convertConfirmedPreferencesToBuyerProfile(
+    excludedSuvConversion.buyerProfile,
+    approveConfirmedPreferenceProfile(allowedSuvDraft, 51),
+  );
+  check("BuyerProfile revision removes stale relationship state", () => {
+    assert.deepEqual(allowedSuvConversion.buyerProfile.allowedBodyStyles, ["suv"]);
+    assert.equal(allowedSuvConversion.buyerProfile.excludedBodyStyles, undefined);
+  });
 
   check("no-match has recovery actions", () => {
     const state = deriveAdvisorConversationState({ noMatch: true, noMatchExplanation: "No exact match." });
@@ -222,7 +234,7 @@ async function run() {
     assert.equal(repeated.conversationTurns.length, firstContinuation.conversationTurns.length);
   });
 
-  assert.equal(passed.length, 26);
+  assert.equal(passed.length, 27);
   console.log(`Conversation invariants passed ${passed.length} scenarios.`);
   passed.forEach((name, index) => console.log(`PASS ${index + 1}: ${name}`));
 }

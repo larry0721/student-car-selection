@@ -31,6 +31,7 @@ import {
 import { assessCatalogIntentFeasibility } from "./advisorIntegrity";
 import { vehicleCatalog } from "../data/vehicleCatalog";
 import type { BuyerProfile } from "../types/buyer";
+import type { DecisionParticipationPolicyMap, DecisionPolicyDimension } from "../types/decisionPolicy";
 
 export type IntakeStatus =
   | "awaiting_initial_message"
@@ -278,9 +279,6 @@ export async function answerConversationQuestionWithSemantic(
   if (!trimmedAnswer) return session;
 
   const activeQuestion = session.currentQuestion;
-  const deterministicResult = activeQuestion
-    ? interpretClarificationAnswer(session, trimmedAnswer)
-    : emptyClarificationAnswerResult(trimmedAnswer);
   const semanticResult = await service.understand({
     currentMessage: trimmedAnswer,
     conversationHistory: [
@@ -296,7 +294,15 @@ export async function answerConversationQuestionWithSemantic(
   });
   const semanticInterpretation = preferenceInterpretationFromSemanticResult(trimmedAnswer, semanticResult);
   const semanticAnswer = clarificationResultFromSemanticInterpretation(semanticInterpretation, trimmedAnswer);
-  const result = mergeClarificationAnswerResults(deterministicResult, semanticAnswer);
+  const useDeterministicFallback = semanticResult.fallbackUsed || semanticResult.providerUsed === "deterministic";
+  const deterministicAnswer = activeQuestion
+    ? interpretClarificationAnswer(session, trimmedAnswer)
+    : emptyClarificationAnswerResult(trimmedAnswer);
+  // A successful model response is authoritative for the user's answer. The
+  // question-specific parser only supplements a true technical fallback.
+  const result = useDeterministicFallback
+    ? mergeClarificationAnswerResults(deterministicAnswer, semanticAnswer)
+    : semanticAnswer;
 
   const answeredQuestionIds = activeQuestion
     ? [...session.answeredQuestionIds, activeQuestion.id]
@@ -604,19 +610,57 @@ function clarificationResultFromSemanticInterpretation(
   interpretation: PreferenceInterpretation,
   answer: string,
 ): ClarificationAnswerResult {
+  const resolvedRelationshipConflicts = interpretation.conflicts.filter((conflict) =>
+    isResolvedByCanonicalRelationshipIntent(conflict, interpretation.canonicalMappings)
+  );
+  const activeConflicts = interpretation.conflicts.filter(
+    (conflict) => !resolvedRelationshipConflicts.includes(conflict),
+  );
   return {
     profileUpdates: interpretation.suggestedProfileUpdates,
     explicitFacts: interpretation.explicitFacts,
     inferredPreferences: interpretation.inferredPreferences,
     confidenceByField: interpretation.confidenceByField,
     resolvedUncertaintyTopics: interpretation.confidenceByField.map((field) => topicForField(field.field)),
-    resolvedConflictTopics: interpretation.conflicts.length ? [] : ["Understanding unavailable"],
+    resolvedConflictTopics: [
+      ...resolvedRelationshipConflicts.map((conflict) => conflict.topic),
+      ...(activeConflicts.length ? [] : ["Understanding unavailable"]),
+    ],
     newUncertainties: interpretation.uncertainties,
-    newConflicts: interpretation.conflicts,
+    newConflicts: activeConflicts,
     acknowledgement: interpretation.interpretationSummary || "That helps. I'll keep that with the rest of what you've told me.",
     evidencePhrase: answer,
     canonicalMappings: interpretation.canonicalMappings,
   };
+}
+
+function isResolvedByCanonicalRelationshipIntent(
+  conflict: PreferenceConflict,
+  mappings: NonNullable<PreferenceInterpretation["canonicalMappings"]> = [],
+) {
+  const relationshipConcepts = new Set([
+    "vehicle_make",
+    "body_style",
+    "vehicle_category",
+    "fuel_type",
+    "drivetrain",
+    "transmission",
+  ]);
+  const conflictText = `${conflict.topic} ${conflict.description} ${conflict.evidencePhrases.join(" ")}`.toLowerCase();
+  const describesRelationshipRevision = conflict.conflictType === "correction"
+    || conflict.conflictType === "changed_mind"
+    || (
+      /\b(?:initially|earlier|previously|then|changed|revised|replaced|relaxed|no longer)\b/.test(conflictText)
+      && /\b(?:excluded|allowed|required|preferred|wanted|did not want|don't want)\b/.test(conflictText)
+    );
+  if (!describesRelationshipRevision) return false;
+  return mappings.some((mapping) =>
+    relationshipConcepts.has(mapping.conceptType)
+    && mapping.intent !== "uncertain"
+    && mapping.confirmationStatus === "confirmed"
+    && (Array.isArray(mapping.value) ? mapping.value : [mapping.value])
+      .some((value) => conflictText.includes(String(value).toLowerCase()))
+  );
 }
 
 function emptyClarificationAnswerResult(answer: string): ClarificationAnswerResult {
@@ -1201,6 +1245,7 @@ function mergePreferenceInterpretation(
     mergeProfileUpdates(interpretation.suggestedProfileUpdates, result.profileUpdates),
     canonicalMappings,
     result.canonicalMappings,
+    result.profileUpdates.decisionPolicies,
   );
   const explicitFacts = mergeFacts(interpretation.explicitFacts, result.explicitFacts);
   const inferredPreferences = mergeInferredPreferences(interpretation.inferredPreferences, result.inferredPreferences, result.explicitFacts);
@@ -1220,10 +1265,7 @@ function mergePreferenceInterpretation(
     suggestedProfileUpdates,
     nextClarifyingQuestion: "",
     canonicalMappings,
-    decisionPolicies: mergeDecisionParticipationPolicyMaps(
-      interpretation.decisionPolicies,
-      result.profileUpdates.decisionPolicies,
-    ),
+    decisionPolicies: suggestedProfileUpdates.decisionPolicies || {},
   };
 }
 
@@ -1450,6 +1492,7 @@ function mergeCanonicalProfileUpdates(
   current: BuyerProfilePatch,
   canonicalMappings: CanonicalMappedConcept[],
   latestMappings: CanonicalMappedConcept[] = [],
+  latestPolicies: DecisionParticipationPolicyMap | undefined = undefined,
 ) {
   const next: BuyerProfilePatch = { ...current };
   const latestConcepts = new Set(latestMappings.map((item) => item.conceptType));
@@ -1495,7 +1538,34 @@ function mergeCanonicalProfileUpdates(
     delete next.excludedTransmissions;
   }
 
+  const affectedPolicyDimensions = new Set<DecisionPolicyDimension>();
+  for (const concept of latestConcepts) {
+    const dimension = decisionPolicyDimensionForSemanticConcept(concept);
+    if (dimension) affectedPolicyDimensions.add(dimension);
+  }
+  if (next.decisionPolicies && affectedPolicyDimensions.size) {
+    next.decisionPolicies = { ...next.decisionPolicies };
+    for (const dimension of affectedPolicyDimensions) {
+      if (!latestPolicies?.[dimension]) delete next.decisionPolicies[dimension];
+    }
+    if (!Object.keys(next.decisionPolicies).length) delete next.decisionPolicies;
+  }
+
   return mergeProfileUpdates(next, buildProfilePatch(canonicalMappings) as BuyerProfilePatch);
+}
+
+function decisionPolicyDimensionForSemanticConcept(
+  concept: CanonicalMappedConcept["conceptType"],
+): DecisionPolicyDimension | undefined {
+  const dimensions: Partial<Record<CanonicalMappedConcept["conceptType"], DecisionPolicyDimension>> = {
+    vehicle_make: "make",
+    body_style: "bodyStyle",
+    vehicle_category: "bodyStyle",
+    fuel_type: "fuelType",
+    drivetrain: "drivetrain",
+    transmission: "transmission",
+  };
+  return dimensions[concept];
 }
 
 function mergeFacts(current: PreferenceFact[], updates: PreferenceFact[]) {

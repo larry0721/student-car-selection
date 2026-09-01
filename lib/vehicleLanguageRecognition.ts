@@ -72,6 +72,22 @@ export function recognizeVehicleLanguage(text: string): VehicleLanguageRecogniti
     });
   }
 
+  const unknownExcluded = getUnknownExcludedVehicleTerm(text);
+  if (
+    unknownExcluded
+    && ![...recognizedEntities, ...referenceEntities, ...unresolvedVehicleLanguage]
+      .some((entity) => entity.rawText.toLowerCase() === unknownExcluded.toLowerCase())
+  ) {
+    unresolvedVehicleLanguage.push({
+      kind: "unknown_vehicle_language",
+      canonicalName: unknownExcluded,
+      rawText: unknownExcluded,
+      confidence: 0.45,
+      concept: "unknown",
+      source: "deterministic-normalization",
+    });
+  }
+
   for (const model of modelReferences) {
     const evidence = findFirstMatch(text, model.patterns);
     if (!evidence) continue;
@@ -128,6 +144,18 @@ function findFirstMatch(text: string, patterns: RegExp[]) {
 
 function getOutOfScopeVehicleTerm(text: string) {
   return text.match(/\b(?:motorcycle|motorbike|rv|camper van|atv|electric scooter|scooter|boat)\b/i)?.[0] || "";
+}
+
+function getUnknownExcludedVehicleTerm(text: string) {
+  const match = text.match(
+    /\b(?:no|not|avoid|exclude|except|anything (?:but|except)|stay away from)\s+(?:a\s+|an\s+)?([A-Za-z][A-Za-z0-9-]{2,})\b/i,
+  );
+  const value = match?.[1] || "";
+  if (!value || value[0] !== value[0].toUpperCase()) return "";
+  if (/^(?:SUVs?|trucks?|pickups?|minivans?|sedans?|wagons?|hatchbacks?|coupes?|convertibles?|AWD|4WD|FWD|RWD|diesel|electric|hybrid|manual|automatic|CVT)$/i.test(value)) {
+    return "";
+  }
+  return value;
 }
 
 function getMakeReferenceQualities(make: string, text: string) {

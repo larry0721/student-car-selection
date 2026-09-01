@@ -412,6 +412,10 @@ function addInterpretationSources(validated: ValidatedUnderstanding, defaultSour
     ...item,
     interpretationSource: inferSource(item, bucket, defaultSource),
   }));
+  draft.decisionPolicyInstructions = draft.decisionPolicyInstructions.map((instruction) => ({
+    ...instruction,
+    interpretationSource: inferPolicySource(instruction.status, defaultSource),
+  }));
   const accepted = getAllInterpretationsFromDraft(draft).filter((item) =>
     validated.acceptedInterpretations.some((acceptedItem) => acceptedItem.id === item.id),
   );
@@ -432,10 +436,23 @@ function inferSource(
   bucket: string,
   defaultSource: InterpretationSource,
 ): InterpretationSource {
-  if (item.interpretationSource) return item.interpretationSource;
-  if (bucket === "recognizedEntities" || bucket === "referenceEntities") return "deterministic_recognition";
+  // Provider provenance is owned by this service boundary. A model may describe
+  // meaning, but it cannot classify its own output as deterministic evidence.
   if (item.status === "contradicted" || item.id.startsWith("evolution:")) return "user_correction";
+  if (
+    (bucket === "recognizedEntities" || bucket === "referenceEntities")
+    && defaultSource === "deterministic_fallback"
+  ) {
+    return "deterministic_recognition";
+  }
   return defaultSource;
+}
+
+function inferPolicySource(
+  status: UnderstandingDraft["decisionPolicyInstructions"][number]["status"],
+  defaultSource: InterpretationSource,
+): InterpretationSource {
+  return status === "contradicted" ? "user_correction" : defaultSource;
 }
 
 function mapDraftInterpretations(

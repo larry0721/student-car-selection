@@ -96,6 +96,7 @@ export function preferenceInterpretationFromValidatedUnderstanding(
     topic: conflict.topic,
     description: conflict.description,
     evidencePhrases: conflict.evidenceRefs,
+    conflictType: conflict.conflictType,
   }));
 
   return {
@@ -174,7 +175,7 @@ function labelForDestination(destination: CanonicalMappedConcept["destination"])
     requiredMake: "Required make",
     preferredMake: "Preferred make",
     allowedMakes: "Allowed makes",
-    excludedMakes: "Excluded make",
+    excludedMakes: "Excluded makes",
     requiredMakes: "Required make",
     preferredMakes: "Preferred make",
     requiredBodyStyles: "Required body style",

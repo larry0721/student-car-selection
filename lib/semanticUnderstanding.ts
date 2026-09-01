@@ -10,6 +10,10 @@ import {
   type VehicleLanguageRecognitionResult,
 } from "./vehicleLanguageRecognition";
 import {
+  relationshipScopeForMention,
+  resolveScopedRelationshipIntent,
+} from "./semanticPolarity";
+import {
   decisionPolicyDimensionValues,
   type SemanticDecisionPolicyInstruction,
 } from "../types/decisionPolicy";
@@ -430,6 +434,7 @@ function buildDeterministicDraft(request: SemanticUnderstandingRequest): Underst
   });
 
   vehicleLanguage.unresolvedVehicleLanguage.forEach((entity, index) => {
+    const unresolvedIntent = resolveScopedRelationshipIntent(message, { evidence: entity.rawText });
     draft.unresolvedConcepts.push(interpretation({
       id: `unknown-vehicle:${index}:${entity.rawText}`,
       concept: "unknown",
@@ -437,11 +442,14 @@ function buildDeterministicDraft(request: SemanticUnderstandingRequest): Underst
       sourceText: entity.rawText,
       messageRef,
       status: "unresolved",
+      intent: unresolvedIntent === "excluded" ? "excluded" : "uncertain",
       confidence: entity.confidence,
-      strength: "unresolved",
-      explanation: isOutOfScopeVehicleTerm(entity.rawText)
-        ? `${entity.rawText} is vehicle-domain language outside the current passenger-car and light-truck scope.`
-        : `${entity.rawText} looks like vehicle language, but it was not recognized confidently.`,
+      strength: unresolvedIntent === "excluded" ? "required" : "unresolved",
+      explanation: unresolvedIntent === "excluded"
+        ? `${entity.rawText} was explicitly excluded, but it was not normalized to a known make or model.`
+        : isOutOfScopeVehicleTerm(entity.rawText)
+          ? `${entity.rawText} is vehicle-domain language outside the current passenger-car and light-truck scope.`
+          : `${entity.rawText} looks like vehicle language, but it was not recognized confidently.`,
       requiresConfirmation: true,
     }));
     draft.uncertainties.push({
@@ -714,6 +722,7 @@ function addPracticalLanguage(message: string, messageRef: string, draft: Unders
     }
   }
   addAdditionalBodyStyleAversions(message, messageRef, draft, bodyStyleIntent?.bodyStyle);
+  addBodyClassDistinctionUncertainty(message, messageRef, draft);
 
   for (const drivetrain of getDrivetrainIntents(message)) {
     draft.explicitPreferences.push(interpretation({
@@ -805,6 +814,42 @@ function addPracticalLanguage(message: string, messageRef: string, draft: Unders
       question: "What matters most for your camping trips: extra cargo room, rough-road/AWD capability, sleeping space, or towing?",
     });
   }
+}
+
+function addBodyClassDistinctionUncertainty(
+  message: string,
+  messageRef: string,
+  draft: UnderstandingDraft,
+) {
+  const suv = message.match(/\bsuvs?\b/i)?.[0];
+  const crossover = message.match(/\bcrossovers?\b/i)?.[0];
+  if (!suv || !crossover) return;
+  const suvIntent = resolveScopedRelationshipIntent(message, { evidence: suv });
+  const crossoverIntent = resolveScopedRelationshipIntent(message, { evidence: crossover });
+  if (!suvIntent || !crossoverIntent || suvIntent === crossoverIntent) return;
+
+  draft.unresolvedConcepts.push(interpretation({
+    id: "practical:body-class-distinction:crossover",
+    concept: "unknown",
+    proposedValue: "crossover distinct from SUV",
+    sourceText: crossover,
+    messageRef,
+    status: "unresolved",
+    intent: "uncertain",
+    confidence: 0.98,
+    strength: "unresolved",
+    explanation: "The user distinguishes crossovers from SUVs, while the current catalog groups crossovers under SUV.",
+    requiresConfirmation: true,
+  }));
+  draft.uncertainties.push({
+    id: "uncertainty:body-class-distinction:crossover",
+    topic: "SUV and crossover classification",
+    sourceText: `${suv}; ${crossover}`,
+    messageRef,
+    possibleInterpretations: ["exclude every catalog SUV/crossover", "allow catalog crossovers after a more specific classification is available"],
+    impact: "high",
+    question: "This catalog currently groups crossovers with SUVs. Should I exclude that whole group for now?",
+  });
 }
 
 function getBodyStyleIntent(message: string): {
@@ -915,7 +960,7 @@ function addAdditionalBodyStyleAversions(message: string, messageRef: string, dr
   const styles: Array<[string, RegExp]> = [
     ["sedan", /\bsedans?\b/i], ["suv", /\b(?:suvs?|crossovers?)\b/i], ["hatchback", /\b(?:hatchbacks?|hatches)\b/i],
     ["truck", /\b(?:trucks?|pickups?)\b/i], ["coupe", /\bcoupes?\b/i], ["wagon", /\b(?:wagons?|estates?)\b/i],
-    ["minivan", /\b(?:minivan|mini van)\b/i],
+    ["minivan", /\b(?:minivans?|mini vans?)\b/i],
   ];
   for (const [style, pattern] of styles) {
     const match = message.match(pattern);
@@ -976,8 +1021,7 @@ function wordNumber(value: string) {
 }
 
 function isExcludedVehicleEntity(message: string, rawText: string) {
-  const clause = clauseForVehicleTerm(message, rawText);
-  return /\b(?:do not want|don't want|dont want|avoid|exclude|except|no|not)\b/i.test(clause);
+  return resolveScopedRelationshipIntent(message, { evidence: rawText }) === "excluded";
 }
 
 function findExclusionEvidence(message: string, rawText: string) {
@@ -987,9 +1031,7 @@ function findExclusionEvidence(message: string, rawText: string) {
 }
 
 function clauseForVehicleTerm(message: string, rawText: string) {
-  return message
-    .split(/\s*(?:,|;|\bbut\b|\band\b)\s*/i)
-    .find((part) => part.toLowerCase().includes(rawText.toLowerCase())) || message;
+  return relationshipScopeForMention(message, { evidence: rawText });
 }
 
 function intentFromVehicleClause(
@@ -998,11 +1040,9 @@ function intentFromVehicleClause(
   relaxed = false,
 ): CanonicalSemanticIntent {
   const bare = clause.trim().replace(/[.!?]/g, "").toLowerCase() === rawText.trim().toLowerCase();
-  if (/\b(?:do not want|don't want|dont want|avoid|exclude|except|no)\b/i.test(clause)) return "excluded";
-  if (/\b(?:acceptable|okay|ok|fine|if necessary|fallback)\b/i.test(clause)) return "allowed";
+  const scopedIntent = resolveScopedRelationshipIntent(clause, { evidence: rawText });
+  if (scopedIntent) return scopedIntent;
   if (relaxed) return "uncertain";
-  if (/\b(?:maybe|prefer|preferred|would like)\b/i.test(clause)) return "preferred";
-  if (/\b(?:want|need|must|required|only|has to be|looking for|find|show me)\b/i.test(clause)) return "required";
   return bare ? "uncertain" : "required";
 }
 
@@ -1031,11 +1071,9 @@ function requiresMakeConfirmation(message: string, rawText: string, required: bo
 }
 
 function isAllowedMakeLanguage(message: string, rawText: string) {
-  const clause = message
-    .split(/\s*(?:,|;|\bbut\b)\s*/i)
-    .find((part) => part.toLowerCase().includes(rawText.toLowerCase())) || message;
-  if (/\b(?:prefer|preferred|maybe)\b/i.test(clause)) return false;
-  return /\b(?:acceptable|okay|ok|fine|allowed|either|or)\b/i.test(clause);
+  const intent = resolveScopedRelationshipIntent(message, { evidence: rawText });
+  if (intent) return intent === "allowed";
+  return /\b(?:either|or)\b/i.test(relationshipScopeForMention(message, { evidence: rawText }));
 }
 
 function isBareMakeLanguage(message: string, rawText: string) {
@@ -1085,9 +1123,9 @@ function addFinancialLanguage(message: string, messageRef: string, draft: Unders
       requiresConfirmation: false,
     }));
   }
-  if (/\b(?:hybrid|electric|ev|diesel)\b/i.test(message)) {
-    const values: Array<["hybrid" | "electric" | "diesel", RegExp]> = [
-      ["hybrid", /\bhybrid\b/i], ["electric", /\b(?:electric|ev)\b/i], ["diesel", /\bdiesel\b/i],
+  if (/\b(?:hybrid|electric|ev|diesel|gas|gasoline)\b/i.test(message)) {
+    const values: Array<["hybrid" | "electric" | "diesel" | "gas", RegExp]> = [
+      ["hybrid", /\bhybrid\b/i], ["electric", /\b(?:electric|ev)\b/i], ["diesel", /\bdiesel\b/i], ["gas", /\b(?:gas|gasoline)\b/i],
     ];
     for (const [value, pattern] of values) {
       const match = message.match(pattern);
@@ -1125,6 +1163,21 @@ function addFinancialLanguage(message: string, messageRef: string, draft: Unders
 
 function addExperienceLanguage(message: string, messageRef: string, draft: UnderstandingDraft) {
   const lower = message.toLowerCase();
+  const engagementPattern = /\b(?:fun|engaging|exciting|enjoyable to drive|driver engagement)\b/i;
+  if (engagementPattern.test(message)) {
+    draft.explicitPreferences.push(interpretation({
+      id: "experience:engagement",
+      concept: "engagement",
+      proposedValue: "an engaging driving experience",
+      sourceText: findEvidence(message, engagementPattern),
+      messageRef,
+      status: "explicit",
+      confidence: 0.84,
+      strength: "preferred",
+      explanation: "The user wants the car to feel engaging or enjoyable to drive.",
+      requiresConfirmation: false,
+    }));
+  }
   const accelerationPattern = /\bpowerful|effortless|merge|passing|move(?:s)?|quick|fast|acceleration|highway pull|freeway traffic|on-ramp\b/i;
   if (accelerationPattern.test(message)) {
     const ambiguous = /\bpowerful\b/i.test(message) && !/\bmerge|passing|highway|quick|fast|acceleration\b/i.test(message);
