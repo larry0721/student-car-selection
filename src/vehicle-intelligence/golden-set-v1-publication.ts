@@ -201,19 +201,29 @@ function validateProductionClaims(
   state: VehicleKnowledgeRepositoryState,
 ) {
   if (!claims.length) throw new Error(`${spec.vehicleId} has no retained knowledge claims.`);
-  if (claims.some((claim) => claim.dataClassification !== "reviewed_source"
-    || claim.source.sourceType !== "epa"
-    || claim.sourceRecordId !== spec.epaSourceId
-    || claim.reviewDecisionId !== decisionId
-    || !claim.reviewContext
-    || claim.reviewContext.reviewDecisionId !== decisionId)) {
-    throw new Error(`${spec.vehicleId} contains knowledge outside its approved production EPA lineage.`);
-  }
   const evidenceById = new Map(state.evidence.map((item) => [item.evidenceId, item]));
   for (const claim of claims) {
+    const isApprovedEpaClaim = claim.dataClassification === "reviewed_source"
+      && claim.source.sourceType === "epa"
+      && claim.sourceRecordId === spec.epaSourceId
+      && claim.reviewDecisionId === decisionId
+      && claim.reviewContext?.reviewDecisionId === decisionId;
+    const isVerifiedNhtsaCrashClaim = claim.canonicalFieldPath === "safety.crashSafety"
+      && claim.dataClassification === "verified_source"
+      && claim.source.sourceType === "nhtsa"
+      && claim.source.providerName === "NHTSA Safety Ratings / NCAP"
+      && claim.source.sourceUrl?.startsWith("https://api.nhtsa.gov/SafetyRatings/VehicleId/") === true
+      && claim.reviewDecisionId === null
+      && claim.reviewContext === null;
+    if (!isApprovedEpaClaim && !isVerifiedNhtsaCrashClaim) {
+      throw new Error(`${spec.vehicleId} contains a claim outside its approved EPA or verified NHTSA crash lineage.`);
+    }
     if (!claim.evidenceIds.length || claim.evidenceIds.some((id) => {
       const evidence = evidenceById.get(id);
-      return !evidence || evidence.dataUse !== "production" || evidence.sourceType !== "epa" || evidence.sourceRecordId !== spec.epaSourceId;
+      return !evidence
+        || evidence.dataUse !== "production"
+        || evidence.sourceType !== claim.source.sourceType
+        || evidence.sourceRecordId !== claim.sourceRecordId;
     })) throw new Error(`${spec.vehicleId} contains missing, fixture, or mismatched source evidence.`);
   }
 }

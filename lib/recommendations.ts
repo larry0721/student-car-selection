@@ -1151,7 +1151,7 @@ function getMissingInformation(vehicle: Vehicle): MissingInformation[] {
     missing.push({ field: "fuelEconomyOverlay", expectedSource: "fueleconomy.gov", impact: "medium" });
   }
   if (!vehicle.dataSources?.some((source) => source === "nhtsa")) {
-    missing.push({ field: "bodyAndSafetyOverlay", expectedSource: "nhtsa", impact: "medium" });
+    missing.push({ field: "bodyStyleOverlay", expectedSource: "nhtsa", impact: "medium" });
   }
   if (vehicle.maintenanceEstimate === undefined) missing.push({ field: "maintenanceOverlay", expectedSource: "csv-import", impact: "medium" });
   return missing.slice(0, 5);
@@ -1164,19 +1164,26 @@ function getFieldProvenance(vehicle: ScoredVehicle): FieldProvenance[] {
   const hasNhtsa = sources.includes("nhtsa");
   const hasCsv = sources.includes("csv-import");
   const catalogSource = hasCsv ? "csv-import" : "seed-catalog";
+  const publishedAuthority = (field: string) => vehicle.fieldAuthority?.fields.find(
+    (resolution) => resolution.field === field && resolution.authority === "published_cvr",
+  );
+  const publishedCrashEvidence = vehicle.fieldAuthority?.fields.find(
+    (resolution) => resolution.field === "safetyScore" && resolution.evidenceIds.length > 0,
+  );
 
   return [
-    { field: "make", status: hasListing ? "verified" : "sourced", source: hasListing ? "listing-api" : catalogSource, method: "catalog_identity" },
-    { field: "model", status: hasListing ? "verified" : "sourced", source: hasListing ? "listing-api" : catalogSource, method: "catalog_identity" },
-    { field: "year", status: hasListing || hasNhtsa ? "verified" : "sourced", source: hasNhtsa ? "nhtsa" : hasListing ? "listing-api" : catalogSource, method: "model_year_lookup" },
-    { field: "bodyType", status: hasNhtsa ? "verified" : "sourced", source: hasNhtsa ? "nhtsa" : catalogSource, method: "body_style_lookup" },
-    { field: "drivetrain", status: hasListing ? "verified" : "sourced", source: hasListing ? "listing-api" : catalogSource, method: "catalog_drivetrain" },
-    { field: "transmission", status: hasListing ? "verified" : "sourced", source: hasListing ? "listing-api" : catalogSource, method: "catalog_transmission" },
+    { field: "make", status: publishedAuthority("make") ? "sourced" : hasListing ? "verified" : "sourced", source: publishedAuthority("make") ? "published-cvr" : hasListing ? "listing-api" : catalogSource, method: publishedAuthority("make") ? "field_authority_resolver" : "catalog_identity" },
+    { field: "model", status: publishedAuthority("model") ? "sourced" : hasListing ? "verified" : "sourced", source: publishedAuthority("model") ? "published-cvr" : hasListing ? "listing-api" : catalogSource, method: publishedAuthority("model") ? "field_authority_resolver" : "catalog_identity" },
+    { field: "year", status: publishedAuthority("year") ? "sourced" : hasListing || hasNhtsa ? "verified" : "sourced", source: publishedAuthority("year") ? "published-cvr" : hasNhtsa ? "nhtsa" : hasListing ? "listing-api" : catalogSource, method: publishedAuthority("year") ? "field_authority_resolver" : "model_year_lookup" },
+    { field: "bodyType", status: publishedAuthority("bodyType") ? "sourced" : hasNhtsa ? "verified" : "sourced", source: publishedAuthority("bodyType") ? "published-cvr" : hasNhtsa ? "nhtsa" : catalogSource, method: publishedAuthority("bodyType") ? "field_authority_resolver" : "body_style_lookup" },
+    { field: "drivetrain", status: publishedAuthority("drivetrain") ? "sourced" : hasListing ? "verified" : "sourced", source: publishedAuthority("drivetrain") ? "published-cvr" : hasListing ? "listing-api" : catalogSource, method: publishedAuthority("drivetrain") ? "field_authority_resolver" : "catalog_drivetrain" },
+    { field: "transmission", status: publishedAuthority("transmission") ? "sourced" : hasListing ? "verified" : "sourced", source: publishedAuthority("transmission") ? "published-cvr" : hasListing ? "listing-api" : catalogSource, method: publishedAuthority("transmission") ? "field_authority_resolver" : "catalog_transmission" },
     { field: "price", status: hasListing ? "verified" : "sourced", source: hasListing ? "listing-api" : catalogSource, method: "listing_or_catalog_price" },
     { field: "mileage", status: hasListing ? "verified" : "sourced", source: hasListing ? "listing-api" : catalogSource, method: "listing_or_catalog_mileage" },
-    { field: "mpg", status: hasFuelEconomy ? "verified" : "sourced", source: hasFuelEconomy ? "fueleconomy.gov" : catalogSource, method: "fuel_economy_lookup" },
+    { field: "mpg", status: publishedAuthority("mpg") ? "sourced" : hasFuelEconomy ? "verified" : "sourced", source: publishedAuthority("mpg") ? "published-cvr" : hasFuelEconomy ? "fueleconomy.gov" : catalogSource, method: publishedAuthority("mpg") ? "field_authority_resolver" : "fuel_economy_lookup" },
     { field: "reliabilityScore", status: hasCsv ? "sourced" : "estimated", source: hasCsv ? "csv-import" : "engine", method: hasCsv ? "csv_overlay" : "catalog_score_fallback" },
-    { field: "safetyScore", status: hasNhtsa ? "verified" : "sourced", source: hasNhtsa ? "nhtsa" : catalogSource, method: "safety_score_lookup" },
+    { field: "safetyScore", status: "estimated", source: "engine", method: "catalog_year_body_drivetrain_heuristic" },
+    ...(publishedCrashEvidence ? [{ field: "crashSafetyEvidence", status: "sourced" as const, source: "published-cvr" as const, method: "nhtsa_ncap_evidence_preserved_without_score_substitution" }] : []),
     { field: "insuranceMonthly", status: "estimated", source: "engine", method: "catalog_or_estimate" },
     {
       field: "maintenanceMonthly",
@@ -1332,8 +1339,11 @@ function getPolicyAwareSourceQuality(vehicle: ScoredVehicle) {
     quality = Math.max(quality, 0.9);
     activeSourceCount += 1;
   }
-  if (active.safety.scoringEnabled && sources.includes("nhtsa")) {
-    quality = Math.max(quality, 0.78);
+  const publishedSafetyAuthority = vehicle.fieldAuthority?.fields.some(
+    (resolution) => resolution.field === "safetyScore" && resolution.authority === "published_cvr",
+  );
+  if (active.safety.scoringEnabled && publishedSafetyAuthority) {
+    quality = Math.max(quality, 0.9);
     activeSourceCount += 1;
   }
   if (active.fuelEnergyCost.scoringEnabled && sources.includes("fueleconomy.gov")) {
@@ -1403,6 +1413,11 @@ function getContributionDataStatus(
 ): ContributionDataStatus {
   const sources = vehicle.dataSources || [];
   if (category === "reliability") return sources.includes("csv-import") ? "available" : "estimated";
+  if (category === "safety") {
+    return vehicle.fieldAuthority?.fields.some(
+      (resolution) => resolution.field === "safetyScore" && resolution.authority === "published_cvr",
+    ) ? "available" : "estimated";
+  }
   if (category === "fuelEnergyCost") return sources.includes("fueleconomy.gov") ? "available" : "estimated";
   if (category === "insuranceCost") return "estimated";
   if (category === "maintenanceRisk") {

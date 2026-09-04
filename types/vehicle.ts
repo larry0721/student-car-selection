@@ -3,6 +3,7 @@ import type {
   EffectiveScoringPolicy,
   ScoreContributionRecord,
 } from "@/types/scoring";
+import type { VehicleFieldAuthorityTrace } from "@/types/vehicleFieldAuthority";
 
 export type Vehicle = {
   id: string;
@@ -36,6 +37,7 @@ export type Vehicle = {
   listingUrl?: string;
   dataSources?: string[];
   dataUpdatedAt?: string;
+  fieldAuthority?: VehicleFieldAuthorityTrace;
 };
 
 export type RecommendationConfidence = {
@@ -94,7 +96,7 @@ export type FieldProvenanceStatus = "verified" | "sourced" | "estimated" | "deri
 export type FieldProvenance = {
   field: string;
   status: FieldProvenanceStatus;
-  source: "listing-api" | "fueleconomy.gov" | "nhtsa" | "csv-import" | "seed-catalog" | "user-input" | "engine";
+  source: "listing-api" | "fueleconomy.gov" | "nhtsa" | "published-cvr" | "csv-import" | "seed-catalog" | "user-input" | "engine";
   method: string;
 };
 

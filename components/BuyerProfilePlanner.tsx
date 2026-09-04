@@ -4,6 +4,7 @@ import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { DataImportPanel } from "@/components/DataImportPanel";
 import { VisibleIntelligenceResults } from "@/components/VisibleIntelligenceResults";
 import { vehicleCatalog } from "@/data/vehicleCatalog";
+import { activePublishedVehicleIntelligence } from "@/data/publishedVehicleAuthority";
 import { calculateBudget, formatMoney, formatNumber } from "@/lib/affordability";
 import {
   buildAdvisorCommunicationViewModel,
@@ -41,6 +42,7 @@ import {
   type ProfileConversionEntry,
 } from "@/lib/confirmedProfileConversion";
 import { mergeVehicleData } from "@/lib/data/mergeVehicleData";
+import { resolveVehicleCatalogAuthority } from "@/src/vehicle-intelligence/vehicle-field-authority-resolver";
 import {
   createFineTuneMetadataFromConversion,
   getFineTuneFieldLabel,
@@ -486,7 +488,11 @@ export function BuyerProfilePlanner() {
   }
 
   function getOnlineLookupVehicles(currentProfile: BuyerProfile) {
-    const currentMatches = getRequirementMatches(currentProfile, mergeVehicleData(vehicleCatalog, importedOverlays));
+    const decisionVehicles = resolveVehicleCatalogAuthority(
+      mergeVehicleData(vehicleCatalog, importedOverlays),
+      activePublishedVehicleIntelligence,
+    );
+    const currentMatches = getRequirementMatches(currentProfile, decisionVehicles);
     const shortlist = rankVehicles(currentProfile, currentMatches).slice(0, 10);
     return shortlist;
   }
@@ -617,7 +623,10 @@ export function BuyerProfilePlanner() {
     }
 
     try {
-      const mergedVehicles = mergeVehicleData(vehicleCatalog, [...importedOverlays, ...freshOnlineOverlays]);
+      const mergedVehicles = resolveVehicleCatalogAuthority(
+        mergeVehicleData(vehicleCatalog, [...importedOverlays, ...freshOnlineOverlays]),
+        activePublishedVehicleIntelligence,
+      );
       const strictMatches = getRequirementMatches(searchProfile, mergedVehicles);
       if (!strictMatches.length) {
         const noMatchDecisionSet = getRecommendationDecisionSet(searchProfile, mergedVehicles);

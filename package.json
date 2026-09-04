@@ -5,6 +5,7 @@
   "packageManager": "pnpm@11.7.0",
   "scripts": {
     "dev": "next dev --webpack",
+    "prebuild": "pnpm verify:vehicle-authority-artifact",
     "build": "next build --turbopack",
     "start": "next start",
     "lint": "eslint app components data lib types next.config.ts tailwind.config.ts",
@@ -41,6 +42,10 @@
     "test:decision-relevance": "tsc -p tsconfig.recommendation-tests.json && node /private/tmp/student-car-selection-recommendation-tests/scripts/test_vehicle_decision_relevance.js",
     "test:golden-publication": "tsc -p tsconfig.recommendation-tests.json && node /private/tmp/student-car-selection-recommendation-tests/scripts/test_golden_publication.js",
     "test:shadow-readiness": "tsc -p tsconfig.recommendation-tests.json && node /private/tmp/student-car-selection-recommendation-tests/scripts/test_shadow_recommendation_readiness.js",
+    "test:field-authority": "tsc -p tsconfig.recommendation-tests.json && node /private/tmp/student-car-selection-recommendation-tests/scripts/test_vehicle_field_authority_resolver.js",
+    "generate:vehicle-authority-artifact": "tsc -p tsconfig.recommendation-tests.json && node /private/tmp/student-car-selection-recommendation-tests/scripts/generate_published_vehicle_authority_artifact.js",
+    "test:vehicle-authority-artifact": "tsc -p tsconfig.recommendation-tests.json && node /private/tmp/student-car-selection-recommendation-tests/scripts/test_published_vehicle_authority_artifact.js",
+    "verify:vehicle-authority-artifact": "tsc -p tsconfig.recommendation-tests.json && node /private/tmp/student-car-selection-recommendation-tests/scripts/test_published_vehicle_authority_artifact.js",
     "test:demo-intelligence": "tsc -p tsconfig.recommendation-tests.json && node /private/tmp/student-car-selection-recommendation-tests/scripts/test_demo_vehicle_intelligence.js",
     "publish:golden-v1": "tsc -p tsconfig.recommendation-tests.json && node /private/tmp/student-car-selection-recommendation-tests/scripts/publish_golden_set_v1.js",
     "test:recommendations": "tsc -p tsconfig.recommendation-tests.json && node /private/tmp/student-car-selection-recommendation-tests/scripts/test_recommendation_profiles.js",

@@ -34,6 +34,7 @@ data/vehicle-knowledge/repositories/**
 data/published-vehicle-intelligence/repositories/**
 !data/published-vehicle-intelligence/repositories/
 !data/published-vehicle-intelligence/repositories/.gitkeep
+!data/published-vehicle-intelligence/repositories/golden-set-v1.json
 
 # Python and OS artifacts
 __pycache__/

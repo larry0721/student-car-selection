@@ -76,6 +76,9 @@
     "scripts/test_vehicle_decision_relevance.ts",
     "scripts/test_golden_publication.ts",
     "scripts/test_shadow_recommendation_readiness.ts",
+    "scripts/test_vehicle_field_authority_resolver.ts",
+    "scripts/generate_published_vehicle_authority_artifact.ts",
+    "scripts/test_published_vehicle_authority_artifact.ts",
     "scripts/publish_golden_set_v1.ts",
     "lib/recommendations.ts",
     "lib/advisorConversation.ts",
@@ -138,6 +141,9 @@
     "src/vehicle-intelligence/published-cvr-repository.ts",
     "src/vehicle-intelligence/golden-set-v1-publication.ts",
     "src/vehicle-intelligence/shadow-recommendation-readiness.ts",
+    "src/vehicle-intelligence/vehicle-field-authority-resolver.ts",
+    "src/vehicle-intelligence/published-vehicle-authority-artifact.ts",
+    "src/vehicle-intelligence/vehicle-energy-field-contract.ts",
     "types/**/*.ts"
   ],
   "exclude": []

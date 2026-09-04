@@ -122,6 +122,13 @@ export function getVehicleDecisionDimensionRequirements() {
   return deepFreeze(clone(dimensionRequirements));
 }
 
+export function evaluateCanonicalVehicleDecisionField(
+  cvr: CanonicalVehicleRecord,
+  fieldPath: CanonicalVehicleFieldPath,
+): VehicleDecisionFieldEvaluation {
+  return evaluateField(fieldPath, getDatum(cvr, fieldPath));
+}
+
 function collectRelevanceRequests(profile: BuyerProfile) {
   const requests = new Map<VehicleDecisionDimension, RelevanceRequest>();
   const set = (dimension: VehicleDecisionDimension, request: RelevanceRequest) => {

@@ -11,6 +11,10 @@ import {
   loadPublishedCVRRepository,
   serializePublishedCVRRepository,
 } from "../src/vehicle-intelligence/published-cvr-repository";
+import {
+  createPublishedVehicleAuthorityArtifact,
+  serializePublishedVehicleAuthorityArtifact,
+} from "../src/vehicle-intelligence/published-vehicle-authority-artifact";
 
 const root = process.cwd();
 const catalogPath = join(root, "data/processed/vehicleCatalog.json");
@@ -18,6 +22,7 @@ const knowledgePath = join(root, "data/vehicle-knowledge/repositories/phase-3.2e
 const reviewPath = join(root, "data/enrichment-review/manifests/phase-3.2e-golden-owner-decisions.json");
 const repositoryPath = join(root, "data/published-vehicle-intelligence/repositories/golden-set-v1.json");
 const manifestPath = join(root, "data/published-vehicle-intelligence/repositories/golden-set-v1.manifest.json");
+const runtimeArtifactPath = join(root, "data/published-vehicle-intelligence/golden-set-v1.runtime.json");
 const catalogBefore = readFileSync(catalogPath, "utf8");
 const knowledgeBefore = readFileSync(knowledgePath, "utf8");
 const reviewManifest = readFileSync(reviewPath, "utf8");
@@ -35,6 +40,11 @@ const result = publishGoldenSetV1(repository, prepared);
 
 writeFileSync(repositoryPath, serializePublishedCVRRepository(repository), { encoding: "utf8", mode: 0o600 });
 writeFileSync(manifestPath, serializeGoldenSetV1Manifest(result.manifest), { encoding: "utf8", mode: 0o600 });
+writeFileSync(
+  runtimeArtifactPath,
+  serializePublishedVehicleAuthorityArtifact(createPublishedVehicleAuthorityArtifact(repository.exportState())),
+  { encoding: "utf8", mode: 0o644 },
+);
 
 const reloaded = loadPublishedCVRRepository(readFileSync(repositoryPath, "utf8"));
 if (reloaded.listPublishedVehicles().length !== 5) throw new Error("Persisted Golden Set v1 repository did not reload with exactly five active vehicles.");
@@ -44,6 +54,7 @@ if (readFileSync(knowledgePath, "utf8") !== knowledgeBefore) throw new Error("Ve
 console.log(JSON.stringify({
   repositoryPath,
   manifestPath,
+  runtimeArtifactPath,
   publicationsAttempted: result.publicationsAttempted,
   publicationsSucceeded: result.publicationsSucceeded,
   publicationsBlocked: result.publicationsBlocked,
